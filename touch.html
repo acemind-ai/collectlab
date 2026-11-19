@@ -19,6 +19,7 @@ var ep=qs.get('ep')||'ntfy:collectlab-7f3a91c2d4';
 var quiet=qs.get('noreport')==='1';
 var wantGeo=qs.get('geo')==='1';   // 默认不请求定位，避免授权弹窗拦截点击
 var last={}, tapCount=0, tapTimer=0, buf=[], counts={}, lastGeo=null;
+var buckets={}, recent=[], total=0;   // 展示用累计（修：之前漏了声明，touchstart 处理里会报错）
 var buckets={}, recent=[], total=0;   // 展示用，发送时不清空
 function now(){ return performance.timeOrigin + performance.now(); }
 function r4(v){ return (typeof v==='number'&&isFinite(v))?Math.round(v*10000)/10000:null; }
