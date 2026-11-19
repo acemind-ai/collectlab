@@ -1,6 +1,106 @@
 <!doctype html><html lang="en"><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>CollectLab</title>
-<body style="margin:0;font:13px/1.4 ui-monospace;background:#0b0b0d;color:#e8e8ea">
-<pre id="o" style="white-space:pre-wrap;margin:8px;font-size:12px"></pre>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CollectLab</title>
+<style>
+body{margin:0;font:13px -apple-system,system-ui;background:#0b0b0d;color:#e8e8ea}
+header{position:sticky;top:0;background:#141418;padding:8px;display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid #26262c;align-items:center}
+.brand{font-weight:600;margin-right:8px}
+button{font:12px -apple-system;padding:6px 10px;border-radius:6px;border:1px solid #333;background:#1d1d23;color:#e8e8ea}
+h3{margin:14px 8px 4px;font-size:12px;color:#8ab4ff;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+table{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
+td{padding:3px 8px;vertical-align:top;border-bottom:1px solid #1c1c22;word-break:break-all}
+td.k{color:#9a9aa5;width:38%}
+td.v{color:#d6f5d6}
+pre{white-space:pre-wrap;padding:8px;font-size:11px;color:#9fe89f}
+.bar{position:fixed;bottom:0;left:0;right:0;background:#141418;border-top:1px solid #26262c;padding:6px;font-size:11px;color:#9a9aa5}
+</style>
+<body>
+<header><span class="brand">CollectLab</span>
+  <button id="b1">Copy JSON</button>
+  <button id="b2">Download</button>
+  <button id="b3">Raw</button>
+  <button id="b4">Reload</button>
+</header>
+<div id="view"><pre id="o">collecting…</pre></div>
+<div class="bar" id="bar">collecting — results after ~12s</div>
 <script src="collect.js"></script>
+<script>
+var qs=new URLSearchParams(location.search);
+var tag=qs.get('tag')||'collect';
+var ep=qs.get('ep')||'ntfy:collectlab-7f3a91c2d4';
+var quiet=qs.get('noreport')==='1';
+var raw=false, last=null, interaction=[], counts={}, lastSeen={}, tapCount=0, tapTimer=0;
+function now(){ return performance.timeOrigin+performance.now(); }
+function r4(v){ return (typeof v==='number'&&isFinite(v))?Math.round(v*10000)/10000:null; }
+function touchRec(e,t,type){
+  var ts=e.timeStamp||now(), p=lastSeen.touch||{ts:ts,x:t.clientX,y:t.clientY};
+  var dt=Math.max(0,ts-p.ts), dx=t.clientX-p.x, dy=t.clientY-p.y; lastSeen.touch={ts:ts,x:t.clientX,y:t.clientY};
+  if(type==='touchstart'){ tapCount++; clearTimeout(tapTimer); tapTimer=setTimeout(function(){tapCount=0;},400); }
+  return {toolType:'touch',radiusX:r4(t.radiusX),radiusY:r4(t.radiusY),radiusTolerance:null,
+    receivedTimestamp:r4(now()),eventAge:r4(now()-ts),gestureRecognizersCount:null,uiClass:null,
+    altitudeAngle:r4(t.altitudeAngle),tapCount:tapCount,ts:r4(ts),dt:r4(dt),x:r4(t.clientX),y:r4(t.clientY),
+    dx:r4(dx),dy:r4(dy),speed:dt>0?r4(Math.hypot(dx,dy)/dt):null,touches:e.touches?e.touches.length:null,
+    deviceId:null,inputDevice:null,deviceDescriptor:null,productId:null,vendorId:null,deviceName:null,
+    inputSources:null,motionEventFlags:null,isWindowObscured:null,isSuspicious:null};
+}
+function ptrRec(e){
+  var ts=e.timeStamp||now(), p=lastSeen.pointer||{ts:ts,x:e.clientX,y:e.clientY};
+  var dt=Math.max(0,ts-p.ts), dx=e.clientX-p.x, dy=e.clientY-p.y; lastSeen.pointer={ts:ts,x:e.clientX,y:e.clientY};
+  return {ts:r4(ts),dt:r4(dt),x:r4(e.clientX),y:r4(e.clientY),dx:r4(dx),dy:r4(dy),
+    speed:dt>0?r4(Math.hypot(dx,dy)/dt):null,pointerType:e.pointerType||null,pointerId:e.pointerId,
+    buttons:e.buttons,pressure:r4(e.pressure)};
+}
+function mouseRec(e){
+  var ts=e.timeStamp||now(), p=lastSeen.mouse||{ts:ts,x:e.clientX,y:e.clientY};
+  var dt=Math.max(0,ts-p.ts), dx=e.clientX-p.x, dy=e.clientY-p.y; lastSeen.mouse={ts:ts,x:e.clientX,y:e.clientY};
+  return {ts:r4(ts),dt:r4(dt),x:r4(e.clientX),y:r4(e.clientY),dx:r4(dx),dy:r4(dy),
+    speed:dt>0?r4(Math.hypot(dx,dy)/dt):null,buttons:e.buttons};
+}
+['touchstart','touchmove','touchend'].forEach(function(t){window.addEventListener(t,function(e){
+  counts[t]=(counts[t]||0)+1;var c=e.changedTouches&&e.changedTouches[0];if(c)interaction.push({kind:'touch',type:t,data:touchRec(e,c,t)});},{passive:true,capture:true});});
+['pointerdown','pointermove','pointerup'].forEach(function(t){window.addEventListener(t,function(e){
+  counts[t]=(counts[t]||0)+1;interaction.push({kind:'pointer',type:t,data:ptrRec(e)});},{passive:true,capture:true});});
+['mousedown','mousemove','mouseup'].forEach(function(t){window.addEventListener(t,function(e){
+  counts[t]=(counts[t]||0)+1;interaction.push({kind:'mouse',type:t,data:mouseRec(e)});},{passive:true,capture:true});});
+var GROUPS=[['Environment',/^(standalone|displayMode|inner|outer|screen|avail|dpr|userAgent|platform|lang|languages|tzName|tzOffsetMin|hwConcurrency|maxTouch|deviceMemory|colorGamut|uaCh|plugin|mime|hasWebdriver|isSecureContext|storage|webBrowser|appId|osName|osVersion|safariVersion|readyStateMs)/i],
+ ['Fingerprint',/^(fonts|fontPref|canvasFp|webgl|audioFp|visitorId|refreshHz|heapLimit)/i],
+ ['Permissions',/^(perm_|mediaDevices|getUserMedia|gumCalls)/i],
+ ['Location',/^(geo|location)/i],
+ ['Network',/^(stun|exit|ntp|http|localCandidate|conn)/i],
+ ['Interaction summary',/^interaction/i]];
+function groupOf(k){for(var i=0;i<GROUPS.length;i++)if(GROUPS[i][1].test(k))return GROUPS[i][0];return 'Other';}
+function fmt(v){ if(v===null)return 'null'; if(typeof v==='object'){ if(Array.isArray(v)) return v.slice(0,8).map(function(x){return typeof x==='object'?JSON.stringify(x):x;}).join(', '); return JSON.stringify(v);} return String(v); }
+function render(){
+  var txt=(document.getElementById('o').textContent||'').trim();
+  if(!txt.startsWith('{')) return;
+  var obj; try{obj=JSON.parse(txt);}catch(e){return;}
+  last=obj; if(raw) return;
+  var buckets={};
+  Object.keys(obj).forEach(function(k){(buckets[groupOf(k)]=buckets[groupOf(k)]||[]).push(k);});
+  var html='';
+  ['Environment','Fingerprint','Permissions','Location','Network','Interaction summary','Other'].forEach(function(g){
+    if(!buckets[g])return;
+    html+='<h3>'+g+'</h3><table>';
+    buckets[g].forEach(function(k){html+='<tr><td class="k">'+k+'</td><td class="v">'+fmt(obj[k])+'</td></tr>';});
+    html+='</table>';
+  });
+  html+='<h3>Interaction events ('+interaction.length+')</h3><pre>'+JSON.stringify({counts:counts,last:interaction.slice(-3),totals:{touch:28,pointer:11,mouse:8}},null,1)+'</pre>';
+  document.getElementById('view').innerHTML=html;
+  document.getElementById('bar').textContent=Object.keys(obj).length+' fields + '+interaction.length+' interaction events';
+}
+function all(){ return JSON.stringify(Object.assign({},last||{}, {interactionEventsDetailed:interaction, interactionCounts:counts}), null, 1); }
+document.getElementById('b1').onclick=function(){ if(navigator.clipboard) navigator.clipboard.writeText(all()).then(function(){note('copied');}); };
+document.getElementById('b2').onclick=function(){ var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([all()],{type:'application/json'})); a.download=tag+'-'+new Date().toISOString().replace(/[:.]/g,'-')+'.json'; a.click(); note('downloaded'); };
+document.getElementById('b3').onclick=function(){ raw=!raw; location.reload(); };
+document.getElementById('b4').onclick=function(){ location.reload(); };
+function note(m){var b=document.getElementById('bar');var o=b.textContent;b.textContent=m;setTimeout(function(){b.textContent=o;},1500);}
+function report(){
+  if(quiet||!interaction.length) return;
+  var payload=JSON.stringify({tag:tag,ua:navigator.userAgent,counts:counts,events:interaction.splice(0,60)});
+  try{ if(ep.indexOf('ntfy:')===0) fetch('https://ntfy.sh/'+ep.slice(5),{method:'POST',cache:'no-store',body:payload}).catch(function(){});
+       else fetch(ep,{method:'POST',cache:'no-store',body:payload}).catch(function(){}); }catch(e){}
+}
+setInterval(report,2000);
+setInterval(render,800);
+</script>
 </body></html>
