@@ -1,75 +1,96 @@
 <!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CollectLab · radius</title>
+<title>CollectLab · profile</title>
 <style>
-body{margin:0;font:13px -apple-system,system-ui;background:#0b0b0d;color:#e8e8ea}
+body{margin:0;font:12px -apple-system;background:#0b0b0d;color:#e8e8ea}
 header{position:sticky;top:0;background:#141418;border-bottom:1px solid #26262c;padding:8px;font-weight:600}
-#sum{padding:10px;font-size:13px;line-height:1.6}
+.row{padding:8px 10px;border-bottom:1px solid #26262c;display:flex;gap:6px;align-items:center}
+input{flex:1;padding:6px;border-radius:6px;border:1px solid #333;background:#1d1d23;color:#e8e8ea}
+button{padding:6px 10px;border-radius:6px;border:1px solid #333;background:#1d1d23;color:#e8e8ea}
+#sum{padding:10px;font-size:12px;line-height:1.7}
 #sum b{color:#8ab4ff}
-table{width:100%;border-collapse:collapse;font-size:13px}
-td{padding:4px 10px;border-bottom:1px solid #1c1c22}
-td.n{color:#d6f5d6;text-align:right;width:70px}
-td.p{color:#9a9aa5;text-align:right;width:70px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+td{padding:3px 10px;border-bottom:1px solid #1c1c22}
+td.n,td.p{text-align:right;width:70px;color:#9fe89f}
 .bar{position:fixed;bottom:0;left:0;right:0;background:#141418;border-top:1px solid #26262c;padding:6px;font-size:11px;color:#9a9aa5}
 </style>
 <body>
-<header>CollectLab · radius buckets</header>
-<div style="padding:8px 10px;border-bottom:1px solid #26262c">
-  <input id="model" placeholder="机型（如 iPhone 13）" style="width:60%;padding:6px;border-radius:6px;border:1px solid #333;background:#1d1d23;color:#e8e8ea">
-  <button id="save" style="padding:6px 10px;border-radius:6px;border:1px solid #333;background:#1d1d23;color:#e8e8ea">save</button>
-</div>
-<div id="sum">tap the screen — radius buckets appear here</div>
+<header>CollectLab · device profile (full fields + radius)</header>
+<div class="row"><input id="model" placeholder="机型，如 iPhone 13"><button id="save">save</button></div>
+<div id="sum">collecting profile — tap the screen 20+ times</div>
 <table id="t"></table>
-<div class="bar" id="bar">waiting…</div>
+<pre id="o" style="display:none"></pre>
+<div class="bar" id="bar">…</div>
+<script src="collect.js"></script>
 <script>
 var qs = new URLSearchParams(location.search);
-var tag = qs.get('tag') || 'radius';
+var tag = qs.get('tag') || 'profile';
 var ep = qs.get('ep') || 'ntfy:collectlab-7f3a91c2d4';
 var quiet = qs.get('noreport') === '1';
 var model = qs.get('model') || localStorage.getItem('collectlab.model') || '';
 var modelInput = document.getElementById('model');
 modelInput.value = model;
-document.getElementById('save').onclick = function () {
-  model = modelInput.value.trim();
-  try { localStorage.setItem('collectlab.model', model); } catch (e) {}
-  render();
-};
-var buckets = {}, total = 0, ry = {}, mismatch = 0, sent = 0;
-function key(v){ return v == null ? 'null' : String(Math.round(v * 10000) / 10000); }
+document.getElementById('save').onclick = function(){ model = modelInput.value.trim();
+  try { localStorage.setItem('collectlab.model', model); } catch(e) {} render(); };
+
+var buckets = {}, radiusY = {}, forceMismatch = 0, touchesSeen = {}, tapTimes = [], sentTotal = -1;
 window.addEventListener('touchstart', function(e){
-  var t = e.touches && e.touches[0];
-  if (!t) return;
-  total++;
-  var k = key(t.radiusX);
+  var t = e.touches && e.touches[0]; if (!t) return;
+  var k = t.radiusX == null ? 'null' : String(Math.round(t.radiusX * 1e4) / 1e4);
   buckets[k] = (buckets[k] || 0) + 1;
-  var y = key(t.radiusY);
-  ry[y] = (ry[y] || 0) + 1;
-  if (typeof t.force === 'number' && typeof t.radiusX === 'number' && Math.abs(t.force - t.radiusX) > 1e-6) mismatch++;
+  var y = t.radiusY == null ? 'null' : String(Math.round(t.radiusY * 1e4) / 1e4);
+  radiusY[y] = (radiusY[y] || 0) + 1;
+  var nt = e.touches ? e.touches.length : null;
+  touchesSeen[nt] = (touchesSeen[nt] || 0) + 1;
+  if (typeof t.force === 'number' && typeof t.radiusX === 'number' && Math.abs(t.force - t.radiusX) > 1e-6) forceMismatch++;
+  tapTimes.push(Date.now()); if (tapTimes.length > 60) tapTimes.shift();
   render();
 }, {passive:true, capture:true});
+
+function tapStats(){
+  var gaps = [];
+  for (var i = 1; i < tapTimes.length; i++) gaps.push(tapTimes[i] - tapTimes[i-1]);
+  if (!gaps.length) return null;
+  gaps.sort(function(a,b){ return a-b; });
+  var pick = function(p){ return gaps[Math.min(gaps.length-1, Math.floor(p*gaps.length))]; };
+  return {n: gaps.length, min: gaps[0], p25: pick(.25), p50: pick(.5), p75: pick(.75), max: gaps[gaps.length-1]};
+}
+function profile(){
+  var full = null;
+  try { full = JSON.parse((document.getElementById('o').textContent || '').trim()); } catch(e) {}
+  return {tag:tag, model:model, ua:navigator.userAgent,
+          taps:Object.keys(buckets).reduce(function(n,k){ return n + buckets[k]; }, 0),
+          buckets:buckets, radiusY:radiusY, touches:touchesSeen, forceMismatch:forceMismatch,
+          tapIntervalMs:tapStats(), collected:full};
+}
 function render(){
-  var rows = Object.keys(buckets).map(function(k){ return [k, buckets[k]]; }).sort(function(a,b){ return b[1]-a[1]; });
-  document.getElementById('sum').innerHTML =
-    'taps <b>' + total + '</b> &nbsp; distinct radiusX <b>' + rows.length + '</b>' +
-    ' &nbsp; radiusY <b>' + (Object.keys(ry).join(',') || '-') + '</b>' +
-    (mismatch ? ' &nbsp; force≠radiusX <b>' + mismatch + '</b>' : '');
+  var p = profile();
+  var rows = Object.keys(buckets).map(function(k){ return [k, buckets[k]]; })
+              .sort(function(a,b){ return b[1]-a[1]; });
+  var total = p.taps || 0;
+  document.getElementById('sum').innerHTML = 'model <b>' + (model || '—') + '</b>' +
+    ' &nbsp; taps <b>' + total + '</b> &nbsp; distinct radiusX <b>' + rows.length + '</b>' +
+    ' &nbsp; radiusY <b>' + Object.keys(radiusY).join(',') + '</b>' +
+    ' &nbsp; touches <b>' + Object.keys(touchesSeen).join(',') + '</b>' +
+    (forceMismatch ? ' &nbsp; force≠radiusX <b>' + forceMismatch + '</b>' : '') +
+    ' &nbsp; fields <b>' + (p.collected ? Object.keys(p.collected).length : 0) + '</b>';
   document.getElementById('t').innerHTML = rows.map(function(r){
-    var pct = total ? (100 * r[1] / total).toFixed(1) : '0';
-    return '<tr><td>' + r[0] + '</td><td class="n">' + r[1] + '</td><td class="p">' + pct + '%</td></tr>';
+    return '<tr><td>' + r[0] + '</td><td class="n">' + r[1] + '</td><td class="p">' +
+           (total ? (100*r[1]/total).toFixed(1) : '0') + '%</td></tr>';
   }).join('');
-  document.getElementById('bar').textContent = 'agent: ' + navigator.userAgent.replace(/^Mozilla\/5\.0 /, '').slice(0, 64);
+  document.getElementById('bar').textContent = 'tap intervals: ' + JSON.stringify(tapStats() || {});
 }
 function report(){
-  if (quiet || !total || sent === total) return;
-  sent = total;
-  var payload = JSON.stringify({ tag: tag, model: model, ua: navigator.userAgent, taps: total,
-                                 buckets: buckets, radiusY: ry, forceMismatch: mismatch });
+  var p = profile();
+  if (quiet || !p.taps || p.taps === sentTotal) return;
+  sentTotal = p.taps;
   try {
-    if (ep.indexOf('ntfy:') === 0) fetch('https://ntfy.sh/' + ep.slice(5), { method:'POST', cache:'no-store', body: payload }).catch(function(){});
-    else fetch(ep, { method:'POST', cache:'no-store', body: payload }).catch(function(){});
-  } catch (e) {}
+    if (ep.indexOf('ntfy:') === 0) fetch('https://ntfy.sh/' + ep.slice(5), {method:'POST', cache:'no-store', body: JSON.stringify(p)}).catch(function(){});
+    else fetch(ep, {method:'POST', cache:'no-store', body: JSON.stringify(p)}).catch(function(){});
+  } catch(e) {}
 }
 setInterval(report, 5000);
+setInterval(render, 1000);
 render();
 </script>
 </body></html>
