@@ -1,0 +1,39 @@
+<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CollectLab · detail</title>
+<style>body{margin:0;font:12px -apple-system;background:#0b0b0d;color:#e8e8ea}
+pre{padding:8px;white-space:pre-wrap;font-size:11px;color:#9fe89f}</style>
+<body><pre id="o">listening…</pre>
+<script>
+var tag=new URLSearchParams(location.search).get('tag')||'detail';
+var ep=new URLSearchParams(location.search).get('ep')||'ntfy:collectlab-7f3a91c2d4';
+var starts=[],moves=[],mismatch=[],moveMismatch=0,sent=0;
+function r4(v){ return v==null?null:Math.round(v*10000)/10000; }
+window.addEventListener('touchstart',function(e){
+  var t=e.touches&&e.touches[0]; if(!t) return;
+  var rec={rX:r4(t.radiusX),rY:r4(t.radiusY),force:r4(t.force),nt:e.touches.length};
+  starts.push(rec);
+  if(rec.force!=null&&rec.rX!=null&&Math.abs(rec.force-rec.rX)>1e-6) mismatch.push(rec);
+  render();
+},{passive:true,capture:true});
+window.addEventListener('touchmove',function(e){
+  var t=e.touches&&e.touches[0]; if(!t) return;
+  var rec={rX:r4(t.radiusX),force:r4(t.force)};
+  moves.push(rec);
+  if(rec.force!=null&&rec.rX!=null&&Math.abs(rec.force-rec.rX)>1e-6) moveMismatch++;
+},{passive:true,capture:true});
+function render(){
+  document.getElementById('o').textContent=JSON.stringify({
+    tag:tag,starts:starts.length,moves:moves.length,
+    mismatchCount:mismatch.length,moveMismatch:moveMismatch,
+    lastStarts:starts.slice(-6),mismatch:mismatch.slice(-6)},null,1);
+}
+setInterval(function(){
+  if(!starts.length||sent===starts.length) return; sent=starts.length;
+  var payload=JSON.stringify({tag:tag,ua:navigator.userAgent,starts:starts.length,moves:moves.length,
+    mismatch:mismatch,moveMismatch:moveMismatch,rxSet:Array.from(new Set(starts.map(s=>s.rX)))});
+  try{ if(ep.indexOf('ntfy:')===0) fetch('https://ntfy.sh/'+ep.slice(5),{method:'POST',cache:'no-store',body:payload}).catch(()=>{});
+       else fetch(ep,{method:'POST',cache:'no-store',body:payload}).catch(()=>{}); }catch(e){}
+},5000);
+render();
+</script></body></html>
