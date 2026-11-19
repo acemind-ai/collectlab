@@ -1,0 +1,39 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<body style="font:12px -apple-system;padding:8px;background:#111;color:#0f0">
+<div id="g" style="margin-bottom:8px">geo: …</div>
+<pre id="o" style="white-space:pre-wrap;word-break:break-all">listening…</pre>
+<script>
+var tag = new URLSearchParams(location.search).get('tag') || 'touch';
+var counts = {}, recent = [], lastGeo = null;
+['touchstart','touchmove','touchend','pointerdown','pointermove','pointerup'].forEach(function(t){
+  window.addEventListener(t, function(e){
+    counts[t] = (counts[t]||0) + 1;
+    var pt = (e.changedTouches && e.changedTouches[0]) || e;
+    if (t === 'touchstart' || t === 'pointerdown') {
+      recent.push({type:t, x:Math.round(pt.clientX||0), y:Math.round(pt.clientY||0),
+                   radiusX:(e.touches&&e.touches[0]&&e.touches[0].radiusX!=null)?e.touches[0].radiusX:null,
+                   radiusY:(e.touches&&e.touches[0]&&e.touches[0].radiusY!=null)?e.touches[0].radiusY:null,
+                   force:(e.touches&&e.touches[0]&&e.touches[0].force!=null)?e.touches[0].force:null,
+                   pointerType:e.pointerType||null, ts:Date.now()});
+      if (recent.length > 12) recent.shift();
+    }
+    render();
+  }, {passive:true, capture:true});
+});
+function render(){
+  document.getElementById('o').textContent = JSON.stringify({tag:tag, counts:counts, touches:recent,
+    geo:lastGeo, perm: (navigator.permissions? 'checked':'n/a')}, null, 1);
+}
+if (navigator.geolocation) {
+  navigator.geolocation.watchPosition(function(p){
+    lastGeo = {lat:p.coords.latitude, lon:p.coords.longitude, acc:p.coords.accuracy,
+               alt:p.coords.altitude, altAcc:p.coords.altitudeAccuracy, speed:p.coords.speed,
+               ts:p.timestamp, age:Date.now()-p.timestamp};
+    document.getElementById('g').textContent = 'geo: ' + JSON.stringify(lastGeo);
+    render();
+  }, function(e){ lastGeo = 'err:'+e.code+':'+e.message; document.getElementById('g').textContent = lastGeo; render(); },
+  {enableHighAccuracy:true, maximumAge:0, timeout:10000});
+}
+render();
+</script></body></html>
