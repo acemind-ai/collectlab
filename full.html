@@ -1,0 +1,82 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>wepoker-h5 采集（全字段）</title>
+<style>
+body{margin:0;font:13px -apple-system;background:#0b0b0d;color:#e8e8ea}
+header{position:sticky;top:0;background:#141418;padding:8px;display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid #26262c}
+button{font:12px -apple-system;padding:6px 10px;border-radius:6px;border:1px solid #333;background:#1d1d23;color:#e8e8ea}
+button:active{background:#2a2a33}
+h3{margin:14px 8px 4px;font-size:12px;color:#8ab4ff;font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:12px}
+td{padding:3px 8px;vertical-align:top;border-bottom:1px solid #1c1c22;word-break:break-all}
+td.k{color:#9a9aa5;width:38%}
+td.v{color:#d6f5d6}
+pre{white-space:pre-wrap;word-break:break-all;padding:8px;font-size:11px;color:#9a9aa5}
+.bar{position:fixed;bottom:0;left:0;right:0;background:#141418;border-top:1px solid #26262c;padding:6px;font-size:11px;color:#9a9aa5}
+</style>
+<body>
+<header>
+  <button onclick="copyAll()">复制 JSON</button>
+  <button onclick="download()">下载 .json</button>
+  <button onclick="toggleRaw()">原始 JSON</button>
+  <button onclick="location.reload()">重新采集</button>
+</header>
+<div id="view"><pre id="o">collecting…</pre></div>
+<div class="bar" id="bar">采集约 12 秒后出结果</div>
+<script src="collect.js"></script>
+<script>
+var raw = false, last = null;
+function toggleRaw(){ raw = !raw; render(); }
+function render(){
+  var txt = document.getElementById('o').textContent || '';
+  var view = document.getElementById('view');
+  if (raw || !txt.trim().startsWith('{')) return;
+  var obj; try { obj = JSON.parse(txt); } catch (e) { return; }
+  last = obj;
+  var groups = {环境:[], 指纹:[], 权限:[], 定位:[], 网络:[], 交互:[], 其他:[]};
+  Object.keys(obj).forEach(function(k){
+    var g = /^perm_|^mediaDevices|^gumCalls/.test(k) ? '权限'
+          : /^geo|^location/.test(k) ? '定位'
+          : /^stun|^exit|^ntp|^http|^localCandidate|^conn/.test(k) ? '网络'
+          : /^interaction/.test(k) ? '交互'
+          : /^fonts|^canvas|^webgl|^audio|^visitorId|^fontPref|^refreshHz|^heapLimit/.test(k) ? '指纹'
+          : /^standalone|^displayMode|^inner|^outer|^screen|^avail|^dpr|^userAgent|^platform|^lang|^tz|^hwConcurrency|^maxTouch|^deviceMemory|^colorGamut|^uaCh|^plugin|^mime|^hasWebdriver|^isSecure|^storage/.test(k) ? '环境'
+          : '其他';
+    groups[g].push([k, obj[k]]);
+  });
+  var html = '';
+  Object.keys(groups).forEach(function(g){
+    if (!groups[g].length) return;
+    html += '<h3>' + g + '</h3><table>';
+    groups[g].forEach(function(pair){
+      var v = pair[1];
+      if (v && typeof v === 'object') {
+        if (Array.isArray(v)) v = v.slice(0, 8).map(function(x){ return typeof x === 'object' ? JSON.stringify(x) : x; }).join(' , ');
+        else v = JSON.stringify(v);
+      }
+      html += '<tr><td class="k">' + pair[0] + '</td><td class="v">' + String(v) + '</td></tr>';
+    });
+    html += '</table>';
+  });
+  view.innerHTML = html;
+  document.getElementById('bar').textContent = '字段数 ' + Object.keys(obj).length + ' ｜ 采集完成';
+}
+function copyAll(){
+  var t = last ? JSON.stringify(last, null, 1) : document.getElementById('o').textContent;
+  navigator.clipboard ? navigator.clipboard.writeText(t).then(function(){ tip('已复制'); }) : tip('长按手动复制');
+}
+function download(){
+  var t = last ? JSON.stringify(last, null, 1) : document.getElementById('o').textContent;
+  var tag = new URLSearchParams(location.search).get('tag') || 'collect';
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([t], {type:'application/json'}));
+  a.download = tag + '-' + new Date().toISOString().replace(/[:.]/g,'-') + '.json';
+  a.click(); tip('已下载');
+}
+function tip(m){ var b = document.getElementById('bar'); var old = b.textContent; b.textContent = m; setTimeout(function(){ b.textContent = old; }, 1500); }
+setInterval(function(){
+  var t = document.getElementById('o').textContent || '';
+  if (t.trim().startsWith('{') && !last) render();
+}, 1000);
+</script>
+</body></html>
