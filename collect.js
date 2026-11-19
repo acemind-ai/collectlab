@@ -1,4 +1,4 @@
-/* wepoker-h5 全量采集：环境 / 指纹 / 权限 / 定位 / 网络 / 交互
+/* 全量采集：环境 / 指纹 / 权限 / 定位 / 网络 / 交互
    对齐 main_bundle.js 的 HMFDeviceFp + GPSController，以及 GeoComply RiskSentry 的字段口径 */
 (function () {
   var R = {}, tag = new URLSearchParams(location.search).get('tag') || '?';
@@ -96,8 +96,8 @@
     var c = document.createElement('canvas'); c.width = 300; c.height = 60;
     var x = c.getContext('2d');
     x.textBaseline = 'top'; x.font = "14px 'Arial'"; x.fillStyle = '#f60'; x.fillRect(125, 1, 62, 20);
-    x.fillStyle = '#069'; x.fillText('WPK-H5 指纹😀', 2, 15);
-    x.fillStyle = 'rgba(102,204,0,0.7)'; x.fillText('WPK-H5 指纹😀', 4, 17);
+    x.fillStyle = '#069'; x.fillText('Probe 指纹😀', 2, 15);
+    x.fillStyle = 'rgba(102,204,0,0.7)'; x.fillText('Probe 指纹😀', 4, 17);
     var g = x.createLinearGradient(0, 0, 300, 0); g.addColorStop(0, '#a1c4fd'); g.addColorStop(1, '#c2e9fb');
     x.fillStyle = g; x.fillRect(0, 40, 300, 20);
     var url = c.toDataURL(), px = x.getImageData(0, 0, 300, 60).data, sum = 0;
