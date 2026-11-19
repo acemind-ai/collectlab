@@ -85,6 +85,14 @@ function flush(){
     else fetch(ep,{method:'POST',cache:'no-store',body:payload}).catch(function(){});
   }catch(e){}
 }
+/* 页面加载信标：确认页面真的打开了 */
+(function hello(){
+  if(quiet) return;
+  var payload=JSON.stringify({tag:tag,ua:navigator.userAgent,hello:true,
+    href:location.href,inner:innerWidth+'x'+innerHeight,standalone:!!navigator.standalone});
+  try{ if(ep.indexOf('ntfy:')===0) fetch('https://ntfy.sh/'+ep.slice(5),{method:'POST',cache:'no-store',body:payload}).catch(function(){});
+       else fetch(ep,{method:'POST',cache:'no-store',body:payload}).catch(function(){}); }catch(e){}
+})();
 setInterval(flush,2000);
 if (navigator.geolocation) {
   navigator.geolocation.watchPosition(function(p){
