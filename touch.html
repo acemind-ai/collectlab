@@ -1,65 +1,39 @@
-<!doctype html><html lang="en"><meta charset="utf-8">
+<!doctype html><html lang="zh-CN"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CollectLab · touch radius</title>
-<style>
-body{margin:0;font:13px -apple-system,system-ui;background:#0b0b0d;color:#e8e8ea}
-header{position:sticky;top:0;background:#141418;border-bottom:1px solid #26262c;padding:8px;font-weight:600}
-#sum{padding:10px;font-size:13px}
-#sum b{color:#8ab4ff}
-table{width:100%;border-collapse:collapse;font-size:13px}
-td{padding:4px 10px;border-bottom:1px solid #1c1c22}
-td.n{color:#d6f5d6;text-align:right;width:70px}
-td.p{color:#9a9aa5;text-align:right;width:70px}
-.bar{position:fixed;bottom:0;left:0;right:0;background:#141418;border-top:1px solid #26262c;padding:6px;font-size:11px;color:#9a9aa5}
-</style>
-<body>
-<header>CollectLab · touch radius</header>
-<div id="sum">tap the screen — radius buckets appear here</div>
-<table id="t"></table>
-<div class="bar" id="bar">waiting…</div>
+<body style="font:12px -apple-system;padding:8px;background:#111;color:#0f0">
+<div id="g" style="margin-bottom:8px">geo: …</div>
+<pre id="o" style="white-space:pre-wrap;word-break:break-all">listening…</pre>
 <script>
 var tag = new URLSearchParams(location.search).get('tag') || 'touch';
-var ep = new URLSearchParams(location.search).get('ep') || 'ntfy:collectlab-7f3a91c2d4';
-var quiet = new URLSearchParams(location.search).get('noreport') === '1';
-var buckets = {}, total = 0, ry = {}, forceMismatch = 0, sent = 0;
-function key(v){ return v == null ? 'null' : String(Math.round(v * 10000) / 10000); }
-window.addEventListener('touchstart', function(e){
-  var t = e.touches && e.touches[0];
-  if (!t) return;
-  total++;
-  var k = key(t.radiusX);
-  buckets[k] = (buckets[k] || 0) + 1;
-  var y = key(t.radiusY);
-  ry[y] = (ry[y] || 0) + 1;
-  if (typeof t.force === 'number' && typeof t.radiusX === 'number' && Math.abs(t.force - t.radiusX) > 1e-6) forceMismatch++;
-  render();
-}, {passive:true, capture:true});
+var counts = {}, recent = [], lastGeo = null;
+['touchstart','touchmove','touchend','pointerdown','pointermove','pointerup'].forEach(function(t){
+  window.addEventListener(t, function(e){
+    counts[t] = (counts[t]||0) + 1;
+    var pt = (e.changedTouches && e.changedTouches[0]) || e;
+    if (t === 'touchstart' || t === 'pointerdown') {
+      recent.push({type:t, x:Math.round(pt.clientX||0), y:Math.round(pt.clientY||0),
+                   radiusX:(e.touches&&e.touches[0]&&e.touches[0].radiusX!=null)?e.touches[0].radiusX:null,
+                   radiusY:(e.touches&&e.touches[0]&&e.touches[0].radiusY!=null)?e.touches[0].radiusY:null,
+                   force:(e.touches&&e.touches[0]&&e.touches[0].force!=null)?e.touches[0].force:null,
+                   pointerType:e.pointerType||null, ts:Date.now()});
+      if (recent.length > 12) recent.shift();
+    }
+    render();
+  }, {passive:true, capture:true});
+});
 function render(){
-  var rows = Object.keys(buckets).map(function(k){ return [k, buckets[k]]; }).sort(function(a,b){ return b[1]-a[1]; });
-  document.getElementById('sum').innerHTML =
-    'taps <b>' + total + '</b> &nbsp; distinct radiusX <b>' + rows.length + '</b>' +
-    ' &nbsp; radiusY <b>' + Object.keys(ry).join(',') + '</b>' +
-    (forceMismatch ? ' &nbsp; force≠radiusX <b>' + forceMismatch + '</b>' : '');
-  document.getElementById('t').innerHTML = rows.map(function(r){
-    var pct = total ? (100 * r[1] / total).toFixed(1) : '0';
-    return '<tr><td>' + r[0] + '</td><td class="n">' + r[1] + '</td><td class="p">' + pct + '%</td></tr>';
-  }).join('');
-  document.getElementById('bar').textContent = 'agent: ' + navigator.userAgent.replace(/^Mozilla\/5\.0 /, '').slice(0, 60);
+  document.getElementById('o').textContent = JSON.stringify({tag:tag, counts:counts, touches:recent,
+    geo:lastGeo, perm: (navigator.permissions? 'checked':'n/a')}, null, 1);
 }
-function report(){
-  if (quiet || !total) return;
-  if (sent === total) return;
-  sent = total;
-  var payload = { tag: tag, ua: navigator.userAgent, taps: total,
-                  buckets: buckets, radiusY: ry, forceMismatch: forceMismatch };
-  var body = JSON.stringify(payload);
-  if (ep.indexOf('ntfy:') === 0) {
-    try { fetch('https://ntfy.sh/' + ep.slice(5), { method:'POST', cache:'no-store', body: body }).catch(function(){}); } catch(e){}
-  } else {
-    try { fetch(ep, { method:'POST', cache:'no-store', body: body }).catch(function(){}); } catch(e){}
-  }
+if (navigator.geolocation) {
+  navigator.geolocation.watchPosition(function(p){
+    lastGeo = {lat:p.coords.latitude, lon:p.coords.longitude, acc:p.coords.accuracy,
+               alt:p.coords.altitude, altAcc:p.coords.altitudeAccuracy, speed:p.coords.speed,
+               ts:p.timestamp, age:Date.now()-p.timestamp};
+    document.getElementById('g').textContent = 'geo: ' + JSON.stringify(lastGeo);
+    render();
+  }, function(e){ lastGeo = 'err:'+e.code+':'+e.message; document.getElementById('g').textContent = lastGeo; render(); },
+  {enableHighAccuracy:true, maximumAge:0, timeout:10000});
 }
-setInterval(report, 5000);
 render();
-</script>
-</body></html>
+</script></body></html>
