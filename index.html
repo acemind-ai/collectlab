@@ -1,63 +1,6 @@
-<!doctype html><html lang="zh-CN"><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>probe</title>
-<pre id="o" style="font:13px/1.4 ui-monospace;white-space:pre-wrap;margin:8px"></pre>
-<script>
-const R={},L=[];const put=(k,v)=>{R[k]=String(v);L.push(k+"="+v)};
-const show=()=>document.getElementById('o').textContent=L.join("\n");
-function h(s){let x=0;for(let i=0;i<s.length;i++)x=(x*31+s.charCodeAt(i))|0;return (x>>>0).toString(16)}
-put("UA",navigator.userAgent);put("platform",navigator.platform);
-put("lang",(navigator.languages||[]).join(","));
-put("tz",Intl.DateTimeFormat().resolvedOptions().timeZone);
-put("tzOff",new Date().getTimezoneOffset());
-put("screen",screen.width+"x"+screen.height+"@"+screen.colorDepth);
-put("avail",screen.availWidth+"x"+screen.availHeight);
-put("inner",innerWidth+"x"+innerHeight);
-put("dpr",devicePixelRatio);
-put("cores",navigator.hardwareConcurrency);
-put("mem",navigator.deviceMemory===undefined?"undef":navigator.deviceMemory);
-put("touch",navigator.maxTouchPoints);
-put("standalone",window.navigator.standalone===undefined?"undef":window.navigator.standalone);
-put("webdriver",navigator.webdriver===undefined?"undef":navigator.webdriver);
-put("uadata",navigator.userAgentData?"yes":"no");
-put("plugins",navigator.plugins?navigator.plugins.length:"undef");
-put("mimes",navigator.mimeTypes?navigator.mimeTypes.length:"undef");
-put("conn",navigator.connection?(navigator.connection.effectiveType+"/rtt="+navigator.connection.rtt):"undef");
-put("battery",navigator.getBattery?"yes":"undef");
-put("media",navigator.mediaDevices?"yes":"no");
-put("rtc",window.RTCPeerConnection?"yes":"no");
-put("secure",isSecureContext);
-put("hidpi",matchMedia("(min-resolution:2dppx)").matches);
-put("pointerCoarse",matchMedia("(pointer:coarse)").matches);
-put("hoverNone",matchMedia("(hover:none)").matches);
-try{const gl=document.createElement("canvas").getContext("webgl");
- const d=gl.getExtension("WEBGL_debug_renderer_info");
- put("glVendor",d?gl.getParameter(d.UNMASKED_VENDOR_WEBGL):"n/a");
- put("glRender",d?gl.getParameter(d.UNMASKED_RENDERER_WEBGL):"n/a");
- put("maxTex",gl.getParameter(gl.MAX_TEXTURE_SIZE));
-}catch(e){put("gl","err")}
-try{const c=document.createElement("canvas");c.width=200;c.height=40;
- const x=c.getContext("2d");x.font="16px sans-serif";x.fillText("fp",2,20);
- put("canvas",h(c.toDataURL()));
-}catch(e){put("canvas","err")}
-show();
-const tag=new URLSearchParams(location.search).get('tag')||'?';
-function send(){fetch('/r?tag='+tag,{method:'POST',body:JSON.stringify(R),cache:'no-store'})}
-// 出口 IP
-fetch("https://ipwho.is/?fields=ip,city,connection",{cache:"no-store",signal:(AbortSignal.timeout?AbortSignal.timeout(5000):undefined)}).then(r=>r.json())
- .then(j=>{put("exitIp",j.ip+" "+(j.city||""));put("isp",(j.connection&&j.connection.isp)||"");})
- .catch(()=>put("exitIp","err"))
- .finally(()=>{
-   let done=false;const fin=()=>{if(done)return;done=true;
-     if(navigator.permissions)navigator.permissions.query({name:"geolocation"})
-       .then(p=>{put("permGeo",p.state);show();send()}).catch(()=>{put("permGeo","err");show();send()});
-     else {show();send();}};
-   try{
-     const pc=new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"}]});
-     let got="none";
-     pc.onicecandidate=e=>{if(e.candidate&&e.candidate.candidate){
-       const m=/ ([\d.]+) (\d+) typ srflx/.exec(e.candidate.candidate); if(m)got=m[1]+":"+m[2];}};
-     pc.createDataChannel("x");pc.createOffer().then(o=>pc.setLocalDescription(o)).catch(()=>{});
-     setTimeout(()=>{put("stunPub",got);show();fin()},4500);
-   }catch(e){put("stunPub","err");fin()}
- });
-</script>
+<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>CollectLab</title>
+<body style="margin:0;font:13px/1.4 ui-monospace;background:#0b0b0d;color:#e8e8ea">
+<pre id="o" style="white-space:pre-wrap;margin:8px;font-size:12px"></pre>
+<script src="collect.js"></script>
+</body></html>
