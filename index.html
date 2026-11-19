@@ -29,7 +29,8 @@ var qs=new URLSearchParams(location.search);
 var tag=qs.get('tag')||'collect';
 var ep=qs.get('ep')||'ntfy:collectlab-7f3a91c2d4';
 var quiet=qs.get('noreport')==='1';
-var raw=false, last=null, interaction=[], counts={}, lastSeen={}, tapCount=0, tapTimer=0;
+var raw=false, last=null, interaction=[], sendQueue=[], counts={}, lastSeen={}, tapCount=0, tapTimer=0;
+var buckets={}, totalTaps=0;   // 展示用累计，不受发送影响
 function now(){ return performance.timeOrigin+performance.now(); }
 function r4(v){ return (typeof v==='number'&&isFinite(v))?Math.round(v*10000)/10000:null; }
 function touchRec(e,t,type){
@@ -57,11 +58,13 @@ function mouseRec(e){
     speed:dt>0?r4(Math.hypot(dx,dy)/dt):null,buttons:e.buttons};
 }
 ['touchstart','touchmove','touchend'].forEach(function(t){window.addEventListener(t,function(e){
-  counts[t]=(counts[t]||0)+1;var c=e.changedTouches&&e.changedTouches[0];if(c)interaction.push({kind:'touch',type:t,data:touchRec(e,c,t)});},{passive:true,capture:true});});
+  counts[t]=(counts[t]||0)+1;var c=e.changedTouches&&e.changedTouches[0];if(c)var rec=touchRec(e,c,t); interaction.push({kind:'touch',type:t,data:rec}); sendQueue.push({kind:'touch',type:t,data:rec});
+      if(t==='touchstart'){ totalTaps++; if(rec.radiusX!=null) buckets[rec.radiusX]=(buckets[rec.radiusX]||0)+1; }
+      if(interaction.length>200) interaction.shift();},{passive:true,capture:true});});
 ['pointerdown','pointermove','pointerup'].forEach(function(t){window.addEventListener(t,function(e){
-  counts[t]=(counts[t]||0)+1;interaction.push({kind:'pointer',type:t,data:ptrRec(e)});},{passive:true,capture:true});});
+  counts[t]=(counts[t]||0)+1;interaction.push({kind:'pointer',type:t,data:ptrRec(e)}); sendQueue.push({kind:'pointer',type:t,data:ptrRec(e)});},{passive:true,capture:true});});
 ['mousedown','mousemove','mouseup'].forEach(function(t){window.addEventListener(t,function(e){
-  counts[t]=(counts[t]||0)+1;interaction.push({kind:'mouse',type:t,data:mouseRec(e)});},{passive:true,capture:true});});
+  counts[t]=(counts[t]||0)+1;interaction.push({kind:'mouse',type:t,data:mouseRec(e)}); sendQueue.push({kind:'mouse',type:t,data:mouseRec(e)});},{passive:true,capture:true});});
 var GROUPS=[['Environment',/^(standalone|displayMode|inner|outer|screen|avail|dpr|userAgent|platform|lang|languages|tzName|tzOffsetMin|hwConcurrency|maxTouch|deviceMemory|colorGamut|uaCh|plugin|mime|hasWebdriver|isSecureContext|storage|webBrowser|appId|osName|osVersion|safariVersion|readyStateMs)/i],
  ['Fingerprint',/^(fonts|fontPref|canvasFp|webgl|audioFp|visitorId|refreshHz|heapLimit)/i],
  ['Permissions',/^(perm_|mediaDevices|getUserMedia|gumCalls)/i],
@@ -84,7 +87,7 @@ function render(){
     buckets[g].forEach(function(k){html+='<tr><td class="k">'+k+'</td><td class="v">'+fmt(obj[k])+'</td></tr>';});
     html+='</table>';
   });
-  html+='<h3>Interaction events ('+interaction.length+')</h3><pre>'+JSON.stringify({counts:counts,last:interaction.slice(-3),totals:{touch:28,pointer:11,mouse:8}},null,1)+'</pre>';
+  html+='<h3>Interaction events (kept '+interaction.length+')</h3><pre>'+JSON.stringify({counts:counts,touchstarts:totalTaps,radiusBuckets:buckets,last:interaction.slice(-3),totals:{touch:28,pointer:11,mouse:8}},null,1)+'</pre>';
   document.getElementById('view').innerHTML=html;
   document.getElementById('bar').textContent=Object.keys(obj).length+' fields + '+interaction.length+' interaction events';
 }
@@ -95,8 +98,9 @@ document.getElementById('b3').onclick=function(){ raw=!raw; location.reload(); }
 document.getElementById('b4').onclick=function(){ location.reload(); };
 function note(m){var b=document.getElementById('bar');var o=b.textContent;b.textContent=m;setTimeout(function(){b.textContent=o;},1500);}
 function report(){
-  if(quiet||!interaction.length) return;
-  var payload=JSON.stringify({tag:tag,ua:navigator.userAgent,counts:counts,events:interaction.splice(0,60)});
+  if(quiet) return;
+  if(!sendQueue.length) return;
+  var payload=JSON.stringify({tag:tag,ua:navigator.userAgent,counts:counts,events:sendQueue.splice(0,60)});
   try{ if(ep.indexOf('ntfy:')===0) fetch('https://ntfy.sh/'+ep.slice(5),{method:'POST',cache:'no-store',body:payload}).catch(function(){});
        else fetch(ep,{method:'POST',cache:'no-store',body:payload}).catch(function(){}); }catch(e){}
 }
