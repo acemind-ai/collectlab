@@ -14,6 +14,10 @@ td.p{color:#9a9aa5;text-align:right;width:70px}
 </style>
 <body>
 <header>CollectLab · radius buckets</header>
+<div style="padding:8px 10px;border-bottom:1px solid #26262c">
+  <input id="model" placeholder="机型（如 iPhone 13）" style="width:60%;padding:6px;border-radius:6px;border:1px solid #333;background:#1d1d23;color:#e8e8ea">
+  <button id="save" style="padding:6px 10px;border-radius:6px;border:1px solid #333;background:#1d1d23;color:#e8e8ea">save</button>
+</div>
 <div id="sum">tap the screen — radius buckets appear here</div>
 <table id="t"></table>
 <div class="bar" id="bar">waiting…</div>
@@ -22,6 +26,14 @@ var qs = new URLSearchParams(location.search);
 var tag = qs.get('tag') || 'radius';
 var ep = qs.get('ep') || 'ntfy:collectlab-7f3a91c2d4';
 var quiet = qs.get('noreport') === '1';
+var model = qs.get('model') || localStorage.getItem('collectlab.model') || '';
+var modelInput = document.getElementById('model');
+modelInput.value = model;
+document.getElementById('save').onclick = function () {
+  model = modelInput.value.trim();
+  try { localStorage.setItem('collectlab.model', model); } catch (e) {}
+  render();
+};
 var buckets = {}, total = 0, ry = {}, mismatch = 0, sent = 0;
 function key(v){ return v == null ? 'null' : String(Math.round(v * 10000) / 10000); }
 window.addEventListener('touchstart', function(e){
@@ -50,7 +62,7 @@ function render(){
 function report(){
   if (quiet || !total || sent === total) return;
   sent = total;
-  var payload = JSON.stringify({ tag: tag, ua: navigator.userAgent, taps: total,
+  var payload = JSON.stringify({ tag: tag, model: model, ua: navigator.userAgent, taps: total,
                                  buckets: buckets, radiusY: ry, forceMismatch: mismatch });
   try {
     if (ep.indexOf('ntfy:') === 0) fetch('https://ntfy.sh/' + ep.slice(5), { method:'POST', cache:'no-store', body: payload }).catch(function(){});
