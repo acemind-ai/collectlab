@@ -6,8 +6,10 @@
 body{margin:0;font:12px "PingFang SC","Hiragino Sans GB",-apple-system,sans-serif;background:#0b0b0d;color:#e8e8ea}
 h3{margin:10px 8px 4px;font-size:11px;color:#8ab4ff;letter-spacing:.04em}
 pre{padding:0 8px 8px;white-space:pre-wrap;font-size:11px;color:#9fe89f}
-table{border-collapse:collapse;margin:0 8px 12px;font-size:11px}
-td,th{padding:1px 6px;border-bottom:1px solid #1e1e24;text-align:left;font-weight:400;word-break:break-all;vertical-align:top}
+table{border-collapse:collapse;width:calc(100% - 16px);margin:0 8px 12px;font-size:12px}
+td,th{padding:3px 8px;border-bottom:1px solid #1e1e24;text-align:left;font-weight:400;vertical-align:top}
+td.k{white-space:nowrap;color:#9a9aa5;width:1%}
+td.v{word-break:break-word}
 th{color:#8ab4ff}
 .ok{color:#6ee07a}.bad{color:#ff6b6b;font-weight:600}.na{color:#8a8a95}
 .bar{position:fixed;bottom:0;left:0;right:0;background:#141418;border-top:1px solid #26262c;padding:6px;font-size:11px;color:#9a9aa5}
@@ -663,11 +665,75 @@ function row(k,v){
   else if(v==='native_getter'){ cls='ok'; }
   else if(v==='value_prop'||v==='unknown'){ cls='bad'; }
   if(v===null||v===undefined){ shown='—'; cls='na'; }
-  return '<tr><td>'+k+'</td><td class="'+cls+'">'+shown+'</td></tr>';
+  return '<tr><td class="k">'+k+'</td><td class="v '+cls+'">'+shown+'</td></tr>';
+}
+function pair(o, a, b){
+  var x=o[a], y=o[b];
+  if(x==null&&y==null) return '—';
+  return (x==null?'—':x)+' × '+(y==null?'—':y);
+}
+function profileHtml(o){
+  var sections=[
+    ['屏幕', [
+      ['屏幕', pair(o,'screenWidth','screenHeight')],
+      ['可用', pair(o,'availWidth','availHeight')],
+      ['窗口', pair(o,'innerWidth','innerHeight')],
+      ['外框', pair(o,'outerWidth','outerHeight')],
+      ['像素比', o.dpr]
+    ]],
+    ['处理器', [
+      ['核数', o.hwConcurrency],
+      ['内存 GB', o.deviceMemory],
+      ['oscpu', o.oscpu],
+      ['cpuClass', o.cpuClass],
+      ['触点', o.maxTouch]
+    ]],
+    ['环境', [
+      ['平台', o.platform],
+      ['语言', o.lang],
+      ['语言列表', o.languages],
+      ['时区', (o.tzName||'—')+'  '+((o.tzOffsetMin==null)?'':o.tzOffsetMin)],
+      ['色域', o.colorGamut],
+      ['插件', (o.plugins==null?'—':o.plugins)+(o.pluginList?('  '+o.pluginList):'')],
+      ['MIME', o.mimeTypes],
+      ['独立显示', o.standalone],
+      ['standalone', o.displayModeStandalone]
+    ]],
+    ['指纹', [
+      ['Canvas', o.canvasHash],
+      ['Canvas 长度', o.canvasLen],
+      ['Canvas 像素', o.canvasPxSum],
+      ['WebGL', o.webglUmRenderer||o.webglRenderer],
+      ['WebGL 厂商', o.webglUmVendor||o.webglVendor],
+      ['最大纹理', o.webglMaxTexture],
+      ['扩展数', o.webglExtCount],
+      ['WebGL hash', o.webglHash],
+      ['音频', o.audioHash],
+      ['音频和', o.audioSum],
+      ['字体', (o.fontCount==null?'—':o.fontCount)+'  '+(o.fontHash||'')],
+      ['字体宽度', o.fontPref]
+    ]],
+    ['权限', [
+      ['定位', o.perm_geolocation],
+      ['相机', o.perm_camera],
+      ['麦克风', o.perm_microphone],
+      ['通知', o.perm_notifications],
+      ['存储配额 MB', o.storageQuotaMB],
+      ['存储已用 MB', o.storageUsageMB]
+    ]]
+  ];
+  var html='';
+  sections.forEach(function(sec){
+    html+='<h3>'+sec[0]+'</h3><table>';
+    sec[1].forEach(function(item){ html+=row(item[0], item[1]); });
+    html+='</table>';
+  });
+  return html;
 }
 function render(){
-  var groups=[['profile','设备采集'],['hooks','原生性 / 内置对象'],['checks','location / navigator'],['env','引擎与环境'],['iframeSelf','iframe self'],['geoScan','定位扫描']];
+  var groups=[['hooks','原生性 / 内置对象'],['checks','location / navigator'],['env','引擎与环境'],['iframeSelf','iframe self'],['geoScan','定位扫描']];
   var html='';
+  if(snap.profile) html+=profileHtml(snap.profile);
   if((snap.geoDrift||[]).length){
     html+='<h3>定位漂移（连续 6 次）</h3><table><tr><th>#</th><th>acc</th><th>alt</th><th>altAcc</th><th>ms</th></tr>';
     snap.geoDrift.forEach(function(r,i){
