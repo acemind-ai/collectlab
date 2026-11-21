@@ -852,17 +852,41 @@ function deviceProfile() {
 
 /* ---- 汇总 ---- */
 var snap={};
+var lastReport='';
+/* ntfy.sh rejects a body over 4096 bytes. The filled profile is larger than that,
+   so the bytes are sent as P <id> <index> <count> <total> slices. */
+function postReport(payload){
+  var url=ep||'https://ntfy.sh/collectlab-7f3a91c2d4';
+  var raw=new TextEncoder().encode(payload);
+  var limit=3200;
+  if(raw.length<=limit){
+    fetch(url,{method:'POST',cache:'no-store',body:raw}).catch(function(){});
+    return;
+  }
+  var id=(tag||'detect')+'-'+Date.now().toString(36);
+  var n=Math.ceil(raw.length/limit);
+  for(var i=0;i<n;i++){
+    var head=new TextEncoder().encode('P '+id+' '+i+' '+n+' '+raw.length+'\n');
+    var slice=raw.subarray(i*limit,Math.min(raw.length,(i+1)*limit));
+    var body=new Uint8Array(head.length+slice.length);
+    body.set(head,0); body.set(slice,head.length);
+    fetch(url,{method:'POST',cache:'no-store',body:body}).catch(function(){});
+  }
+}
 function report(){
-  var payload=JSON.stringify({tag:tag,kind:'detect',ts:new Date().toISOString(),
+  if(quiet||!snap.profile) return;
+  var record={tag:tag,kind:'detect',
     page:{charset:document.characterSet,title:document.title,h1:(document.querySelector('h3')||{}).textContent||''},
-    ua:navigator.userAgent,profile:snap.profile||{},checks:snap.checks||{},hooks:snap.hooks||{},env:snap.env||{},
+    ua:navigator.userAgent,profile:snap.profile,checks:snap.checks||{},hooks:snap.hooks||{},env:snap.env||{},
     iframeSelf:snap.iframeSelf||{},geoScan:snap.geoScan||{},
     behavior:behaviorSignals(),
     geoDrift:snap.geoDrift||[],
-    touch:(function(){ var h={}; Object.keys(radiusHist).forEach(function(k){h[k]=radiusHist[k];}); return {radiusX:h,recent:touchBuf.slice(-10)}; })()});
-  if(quiet) return;
-  try{ if(ep) fetch(ep,{method:'POST',cache:'no-store',body:payload}).catch(function(){});
-       else fetch('https://ntfy.sh/collectlab-7f3a91c2d4',{method:'POST',cache:'no-store',body:payload}).catch(function(){}); }catch(e){}
+    touch:(function(){ var h={}; Object.keys(radiusHist).forEach(function(k){h[k]=radiusHist[k];}); return {radiusX:h,recent:touchBuf.slice(-10)}; })()};
+  var body=JSON.stringify(record);
+  if(body===lastReport) return;
+  lastReport=body;
+  record.ts=new Date().toISOString();
+  try{ postReport(JSON.stringify(record)); }catch(e){}
 }
 function row(k,v){
   var cls='', shown=v;
@@ -1024,7 +1048,6 @@ async function run(){
 }
 document.getElementById('form').addEventListener('submit',function(e){ e.preventDefault(); report(); });
 run();
-setInterval(function(){ report(); },4000);
 document.addEventListener('visibilitychange',function(){ if(document.hidden) report(); });
 setInterval(function(){
   document.getElementById('o').textContent=JSON.stringify(behaviorSignals(),null,1);
