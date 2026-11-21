@@ -34,18 +34,69 @@ document.getElementById('save').onclick = function(){ model = modelInput.value.t
   try { localStorage.setItem('collectlab.model', model); } catch(e) {} render(); };
 
 var buckets = {}, radiusY = {}, forceMismatch = 0, touchesSeen = {}, tapTimes = [], sentTotal = -1;
-window.addEventListener('touchstart', function(e){
-  var t = e.touches && e.touches[0]; if (!t) return;
-  var k = t.radiusX == null ? 'null' : String(Math.round(t.radiusX * 1e4) / 1e4);
-  buckets[k] = (buckets[k] || 0) + 1;
-  var y = t.radiusY == null ? 'null' : String(Math.round(t.radiusY * 1e4) / 1e4);
-  radiusY[y] = (radiusY[y] || 0) + 1;
-  var nt = e.touches ? e.touches.length : null;
-  touchesSeen[nt] = (touchesSeen[nt] || 0) + 1;
-  if (typeof t.force === 'number' && typeof t.radiusX === 'number' && Math.abs(t.force - t.radiusX) > 1e-6) forceMismatch++;
-  tapTimes.push(Date.now()); if (tapTimes.length > 60) tapTimes.shift();
+var touchLog = [], mouseLog = [], pointerLog = [];
+var anchor = {touch:{}, mouse:null, pointer:{}};
+var ITEM_LIMIT = 100;
+function num(v){ return (typeof v==='number' && isFinite(v)) ? Math.round(v*1e4)/1e4 : null; }
+function clock(){ return performance.now(); }
+var pending = {touch:[], mouse:[], pointer:[]};
+function remember(list, kind, item){
+  list.push(item); if (list.length > ITEM_LIMIT) list.shift();
+  pending[kind].push(item);
+}
+function step(prev, ts, x, y){
+  if (!prev) return {dt:0, dx:0, dy:0, speed:null, first:true};
+  var dt = Math.max(0, ts - prev.ts), dx = x - prev.x, dy = y - prev.y;
+  return {dt:dt, dx:dx, dy:dy, speed:dt>0 ? Math.sqrt(dx*dx+dy*dy)/dt : null, first:false};
+}
+function onTouch(e){
+  var ts = clock(), received = typeof e.timeStamp==='number' ? e.timeStamp : ts;
+  var age = Math.max(0, ts - received), n = e.touches ? e.touches.length : 0;
+  var list = e.changedTouches || [];
+  for (var i=0;i<list.length;i++){
+    var t = list[i], id = t.identifier, prev = anchor.touch[id];
+    var d = step(prev, ts, t.clientX, t.clientY);
+    if (!d.first) remember(touchLog, 'touch', {ts:num(ts), dt:num(d.dt), x:num(t.clientX), y:num(t.clientY),
+      dx:num(d.dx), dy:num(d.dy), speed:num(d.speed), touches:n, radiusX:num(t.radiusX), radiusY:num(t.radiusY),
+      receivedTimestamp:num(received), eventAge:num(age)});
+    if (e.type==='touchend' || e.type==='touchcancel') delete anchor.touch[id];
+    else anchor.touch[id] = {ts:ts, x:t.clientX, y:t.clientY};
+    if (e.type==='touchstart'){
+      var k = t.radiusX==null ? 'null' : String(num(t.radiusX));
+      buckets[k] = (buckets[k]||0)+1;
+      var yk = t.radiusY==null ? 'null' : String(num(t.radiusY));
+      radiusY[yk] = (radiusY[yk]||0)+1;
+      touchesSeen[n] = (touchesSeen[n]||0)+1;
+      if (typeof t.force==='number' && typeof t.radiusX==='number' && Math.abs(t.force-t.radiusX)>1e-6) forceMismatch++;
+      tapTimes.push(Date.now()); if (tapTimes.length>60) tapTimes.shift();
+    }
+  }
   render();
-}, {passive:true, capture:true});
+}
+function onMouse(e){
+  var ts = clock(), d = step(anchor.mouse, ts, e.clientX, e.clientY);
+  if (!d.first) remember(mouseLog, 'mouse', {ts:num(ts), dt:num(d.dt), x:num(e.clientX), y:num(e.clientY),
+    dx:num(d.dx), dy:num(d.dy), speed:num(d.speed), buttons:e.buttons});
+  anchor.mouse = (e.type==='mouseup') ? null : {ts:ts, x:e.clientX, y:e.clientY};
+}
+function onPointer(e){
+  var ts = clock(), id = e.pointerId, prev = anchor.pointer[id];
+  var d = step(prev, ts, e.clientX, e.clientY);
+  if (!d.first) remember(pointerLog, 'pointer', {ts:num(ts), dt:num(d.dt), x:num(e.clientX), y:num(e.clientY),
+    dx:num(d.dx), dy:num(d.dy), speed:num(d.speed), pointerType:e.pointerType||null,
+    pointerId:e.pointerId, buttons:e.buttons, pressure:num(e.pressure)});
+  if (e.type==='pointerup' || e.type==='pointercancel') delete anchor.pointer[id];
+  else anchor.pointer[id] = {ts:ts, x:e.clientX, y:e.clientY};
+}
+['touchstart','touchmove','touchend','touchcancel'].forEach(function(type){
+  window.addEventListener(type, onTouch, {passive:true, capture:true});
+});
+['mousedown','mousemove','mouseup'].forEach(function(type){
+  window.addEventListener(type, onMouse, {passive:true, capture:true});
+});
+['pointerdown','pointermove','pointerup','pointercancel'].forEach(function(type){
+  window.addEventListener(type, onPointer, {passive:true, capture:true});
+});
 
 function tapStats(){
   var gaps = [];
@@ -61,7 +112,9 @@ function profile(){
   return {tag:tag, model:model, ua:navigator.userAgent,
           taps:Object.keys(buckets).reduce(function(n,k){ return n + buckets[k]; }, 0),
           buckets:buckets, radiusY:radiusY, touches:touchesSeen, forceMismatch:forceMismatch,
-          tapIntervalMs:tapStats(), collected:full};
+          tapIntervalMs:tapStats(),
+          touch:touchLog.slice(), mouse:mouseLog.slice(), pointer:pointerLog.slice(),
+          collected:full};
 }
 function render(){
   var p = profile();
@@ -73,21 +126,40 @@ function render(){
     ' &nbsp; radiusY <b>' + Object.keys(radiusY).join(',') + '</b>' +
     ' &nbsp; touches <b>' + Object.keys(touchesSeen).join(',') + '</b>' +
     (forceMismatch ? ' &nbsp; force≠radiusX <b>' + forceMismatch + '</b>' : '') +
-    ' &nbsp; fields <b>' + (p.collected ? Object.keys(p.collected).length : 0) + '</b>';
+    ' &nbsp; touch <b>' + touchLog.length + '</b>' +
+    ' &nbsp; mouse <b>' + mouseLog.length + '</b>' +
+    ' &nbsp; pointer <b>' + pointerLog.length + '</b>';
   document.getElementById('t').innerHTML = rows.map(function(r){
     return '<tr><td>' + r[0] + '</td><td class="n">' + r[1] + '</td><td class="p">' +
            (total ? (100*r[1]/total).toFixed(1) : '0') + '%</td></tr>';
   }).join('');
   document.getElementById('bar').textContent = 'tap intervals: ' + JSON.stringify(tapStats() || {});
 }
+function post(body){
+  var url = ep.indexOf('ntfy:')===0 ? 'https://ntfy.sh/'+ep.slice(5) : ep;
+  return fetch(url, {method:'POST', cache:'no-store', body:body}).catch(function(){});
+}
+function flushEvents(){
+  ['touch','mouse','pointer'].forEach(function(kind){
+    var fresh = pending[kind];
+    if (!fresh.length) return;
+    var fit = fresh.slice();
+    var body = JSON.stringify({tag:tag, model:model, ua:navigator.userAgent, kind:kind, events:fit});
+    while (fit.length > 1 && body.length > 3500){ fit.pop(); body = JSON.stringify({tag:tag, model:model, ua:navigator.userAgent, kind:kind, events:fit}); }
+    pending[kind] = fresh.slice(fit.length);
+    post(body);
+  });
+}
 function report(){
   var p = profile();
-  if (quiet || !p.taps || p.taps === sentTotal) return;
-  sentTotal = p.taps;
-  try {
-    if (ep.indexOf('ntfy:') === 0) fetch('https://ntfy.sh/' + ep.slice(5), {method:'POST', cache:'no-store', body: JSON.stringify(p)}).catch(function(){});
-    else fetch(ep, {method:'POST', cache:'no-store', body: JSON.stringify(p)}).catch(function(){});
-  } catch(e) {}
+  if (quiet) return;
+  if (p.taps && p.taps !== sentTotal){
+    sentTotal = p.taps;
+    var summary = {tag:p.tag, model:p.model, ua:p.ua, taps:p.taps, buckets:p.buckets,
+      radiusY:p.radiusY, touches:p.touches, forceMismatch:p.forceMismatch, tapIntervalMs:p.tapIntervalMs};
+    post(JSON.stringify(summary));
+  }
+  flushEvents();
 }
 setInterval(report, 5000);
 setInterval(render, 1000);
