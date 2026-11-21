@@ -584,17 +584,177 @@ function audioFp() {
     } catch (e) { res({ err: e.name }); }
   });
 }
+/* 游戏 deviceFp / webglParams 的采集。detect 原先只留了个数和 hash。 */
+var GAME_FONT_BASE = ['monospace', 'sans-serif', 'serif'];
+var GAME_FONT_FAMILIES = ['sans-serif-thin', 'ARNO PRO', 'Agency FB', 'Arabic Typesetting', 'Arial Unicode MS',
+  'AvantGarde Bk BT', 'BankGothic Md BT', 'Batang', 'Bitstream Vera Sans Mono', 'Calibri', 'Century',
+  'Century Gothic', 'Clarendon', 'EUROSTILE', 'Franklin Gothic', 'Futura Bk BT', 'Futura Md BT', 'GOTHAM',
+  'Gill Sans', 'HELV', 'Haettenschweiler', 'Helvetica Neue', 'Humanst521 BT', 'Leelawadee', 'Letter Gothic',
+  'Levenim MT', 'Lucida Bright', 'Lucida Sans', 'Menlo', 'MS Mincho', 'MS Outlook', 'MS Reference Specialty',
+  'MS UI Gothic', 'MT Extra', 'MYRIAD PRO', 'Marlett', 'Meiryo UI', 'Microsoft Uighur', 'Minion Pro',
+  'Monotype Corsiva', 'PMingLiU', 'Pristina', 'SCRIPTINA', 'Segoe UI Light', 'Serifa', 'SimHei', 'Small Fonts',
+  'Staccato222 BT', 'TRAJAN PRO', 'Univers CE 55 Medium', 'Vrinda', 'ZWAdobeF'];
+function gameFonts() {
+  var body = document.body, host = document.createElement('div');
+  host.style.setProperty('visibility', 'hidden', 'important');
+  body.style.fontSize = '48px';
+  function span(family) {
+    var s = document.createElement('span'), st = s.style;
+    st.position = 'absolute'; st.top = '0'; st.left = '0';
+    st.fontFamily = family; s.textContent = 'mmMwWLliI0O&1';
+    host.appendChild(s); return s;
+  }
+  var baseRefs = {}, baseSizes = {};
+  GAME_FONT_BASE.forEach(function (b) { baseRefs[b] = span(b); });
+  body.appendChild(host);
+  GAME_FONT_BASE.forEach(function (b) { baseSizes[b] = [baseRefs[b].offsetWidth, baseRefs[b].offsetHeight]; });
+  var candidates = {};
+  GAME_FONT_FAMILIES.forEach(function (f) {
+    candidates[f] = GAME_FONT_BASE.map(function (b) { return span("'" + f + "'," + b); });
+  });
+  var detected = GAME_FONT_FAMILIES.filter(function (f) {
+    return candidates[f].some(function (s, i) {
+      var b = GAME_FONT_BASE[i];
+      return s.offsetWidth !== baseSizes[b][0] || s.offsetHeight !== baseSizes[b][1];
+    });
+  });
+  host.remove();
+  return detected;
+}
+function gameFontPreferences() {
+  var stacks = { default: '', apple: '-apple-system-body', serif: 'serif', sans: 'sans-serif', mono: 'monospace', min: 'serif', system: 'system-ui' };
+  var sp = document.createElement('span');
+  sp.style.cssText = 'position:absolute;left:-9999px;font-size:24px;white-space:nowrap';
+  sp.textContent = 'mmmmmmmmmmlli WwQq@#123';
+  document.body.appendChild(sp);
+  var out = {};
+  Object.keys(stacks).forEach(function (k) {
+    sp.style.fontFamily = stacks[k];
+    sp.style.fontSize = k === 'min' ? '1px' : '24px';
+    out[k] = Math.round(sp.getBoundingClientRect().width * 1000) / 1000;
+  });
+  sp.remove();
+  return out;
+}
+function gameCanvas() {
+  var c = document.createElement('canvas'); c.width = 240; c.height = 140;
+  var x = c.getContext('2d');
+  x.textBaseline = 'alphabetic';
+  x.fillStyle = '#f60'; x.fillRect(100, 1, 62, 20);
+  x.fillStyle = '#069'; x.font = '11pt "Times New Roman"';
+  x.fillText('Cwm fjordbank gly 55  ', 2, 15);
+  x.fillStyle = 'rgba(102, 204, 0, 0.2)'; x.font = '18pt Arial';
+  x.fillText('Cwm fjordbank gly 55  ', 4, 45);
+  x.fillStyle = '#f60'; x.beginPath(); x.arc(50, 50, 50, 0, Math.PI * 2, true); x.closePath(); x.fill();
+  x.fillStyle = '#069'; x.beginPath(); x.arc(100, 50, 50, 0, Math.PI * 2, true); x.closePath(); x.fill();
+  x.fillStyle = 'rgba(102, 204, 0, 0.2)'; x.beginPath(); x.arc(75, 50, 50, 0, Math.PI * 2, true); x.closePath(); x.fill();
+  var url = c.toDataURL();
+  return { hash: murmur3(url), len: url.length };
+}
+var GL_PARAMS = { 2849: 'lineWidth', 2884: 'cullFace', 2886: 'depthTestDepthFunc', 2928: 'blendColor',
+  2929: 'depthTest', 2930: 'depthFunc', 2931: 'blendEquation', 2932: 'blendSrc', 2960: 'blendDst',
+  2961: 'blendSrcAlpha', 2962: 'blendDstAlpha', 2963: 'blendEquationAlpha', 2964: 'blendEquationAlpha2',
+  2965: 'blendEquationAlpha3', 2966: 'blendEquationAlpha4', 2978: 'viewport', 3024: 'scissorBox',
+  3042: 'blend', 3088: 'scissorTest', 3089: 'colorLogicOp', 3106: 'stencilTest', 3107: 'stencilFunc',
+  32773: 'stencilOp', 32777: 'blendColor2', 32823: 'polygonOffsetFill', 32824: 'polygonOffset',
+  32936: 'sampleCoverage', 32937: 'sampleCoverageInvert', 32938: 'sampleAlphaToCoverage',
+  32939: 'sampleAlphaToOne', 32968: 'blendSrcRGB', 32969: 'blendDstRGB', 32970: 'blendSrcAlphaRGB',
+  32971: 'blendDstAlphaRGB', 3317: 'clearColor', 33170: 'packAlignment', 3333: 'unpackAlignment',
+  3379: 'maxViewportDims', 3386: 'maxViewportDims2', 33901: 'maxAnisotropy', 33902: 'maxAnisotropy2',
+  34016: 'maxColorAttachments', 34024: 'maxRenderbufferSize', 34076: 'maxColorAttachments2',
+  3410: 'redBits', 3411: 'greenBits', 3412: 'blueBits', 3413: 'alphaBits', 3414: 'depthBits',
+  3415: 'stencilBits', 34467: 'maxDrawBuffers', 34816: 'maxVertexAttribs', 34817: 'maxVertexUniforms',
+  34818: 'maxVaryings', 34819: 'maxFragmentUniforms', 34877: 'maxTextureSize', 34921: 'maxCombinedTextureUnits',
+  34930: 'maxTextureImageUnits', 35660: 'maxTextureImageUnits2', 35661: 'maxCombinedTextureUnits2',
+  35724: 'shadingLanguageVersion', 35738: 'maxCubeMapTextureSize', 35739: 'maxCubeMapTextureSize2',
+  36003: 'maxRenderbufferSize2', 36004: 'maxRenderbufferSize3', 36005: 'maxRenderbufferSize4',
+  36347: 'maxTextureMaxAnisotropy', 36348: 'maxTextureMaxAnisotropy2', 36349: 'maxTextureMaxAnisotropy3',
+  37440: 'maxElementIndex', 37441: 'maxElementIndex2', 37443: 'maxElementIndex3',
+  7936: 'vendor', 7937: 'renderer', 7938: 'version' };
+function glTry(fn) { try { return fn(); } catch (e) { return null; } }
+function glPlain(v) {
+  if (v == null) return v;
+  if (typeof v === 'object' && v.length !== undefined) {
+    try { return Array.prototype.slice.call(v); } catch (e) { return String(v); }
+  }
+  if (typeof v === 'object') return String(v);
+  return v;
+}
+function gameWebgl() {
+  var c = document.createElement('canvas'), gl = null;
+  ['webgl', 'experimental-webgl', 'webgl2'].forEach(function (n) {
+    if (gl) return;
+    gl = glTry(function () { return c.getContext(n); });
+  });
+  if (!gl) return { err: 'no-webgl' };
+  var dbg = gl.getExtension('WEBGL_debug_renderer_info');
+  var params = {};
+  Object.keys(GL_PARAMS).forEach(function (k) {
+    var v = glTry(function () { return gl.getParameter(Number(k)); });
+    if (v == null) return;
+    params[GL_PARAMS[k]] = glPlain(v);
+  });
+  var precisions = {};
+  ['VERTEX_SHADER', 'FRAGMENT_SHADER'].forEach(function (sh) {
+    precisions[sh] = {};
+    ['LOW_FLOAT', 'MEDIUM_FLOAT', 'HIGH_FLOAT', 'LOW_INT', 'MEDIUM_INT', 'HIGH_INT'].forEach(function (p) {
+      var f = glTry(function () { return gl.getShaderPrecisionFormat(gl[sh], gl[p]); });
+      precisions[sh][p] = f ? [f.rangeMin, f.rangeMax, f.precision] : null;
+    });
+  });
+  var attrs = {};
+  var raw = glTry(function () { return gl.getContextAttributes() || {}; }) || {};
+  Object.keys(raw).forEach(function (k) { if (typeof raw[k] !== 'object') attrs[k] = raw[k]; });
+  return {
+    version: String(gl.getParameter(gl.VERSION) || ''),
+    shading: String(gl.getParameter(gl.SHADING_LANGUAGE_VERSION) || ''),
+    umVendor: dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : null,
+    umRenderer: dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : null,
+    extensions: (gl.getSupportedExtensions() || []).slice().sort(),
+    parameters: params,
+    precisions: precisions,
+    attributes: attrs
+  };
+}
+function gameMath() {
+  var m = Math;
+  return {
+    acos: m.acos(0.12312423423423424), acosh: m.acosh(1e308),
+    acoshPf: m.log(1e154 + Math.sqrt(1e308)), asin: m.asin(0.12312423423423424),
+    asinh: m.asinh(1), asinhPf: m.log(1 + Math.sqrt(2)), atanh: m.atanh(0.5),
+    atanhPf: m.log(3) / 2, atan: m.atan(0.5), sin: m.sin(-1e300), sinh: m.sinh(1),
+    sinhPf: m.exp(1) - 1 / m.exp(1) / 2, cos: m.cos(10.000000000123), cosh: m.cosh(1),
+    coshPf: (m.exp(1) + 1 / m.exp(1)) / 2, tan: m.tan(-1e300), tanh: m.tanh(1),
+    tanhPf: (m.exp(2) - 1) / (m.exp(2) + 1), exp: m.exp(1), expm1: m.expm1(1),
+    expm1Pf: m.exp(1) - 1, log1p: m.log1p(10), log1pPf: m.log(11), powPI: m.pow(m.PI, -100)
+  };
+}
+function probeStorage(store) {
+  try {
+    store.setItem('__fp', '1');
+    var ok = store.getItem('__fp') === '1';
+    store.removeItem('__fp');
+    return ok;
+  } catch (e) { return false; }
+}
 function deviceProfile() {
   var fonts = detectFonts();
   var prefs = fontPreferences();
   var canvas = canvasFp();
   var gl = webglFp();
+  var gFonts = gameFonts();
+  var gPrefs = gameFontPreferences();
+  var gCanvas = gameCanvas();
+  var gGl = gameWebgl();
+  var gMath = gameMath();
   var gamut = matchMedia('(color-gamut: rec2020)').matches ? 'rec2020'
     : matchMedia('(color-gamut: p3)').matches ? 'p3'
     : matchMedia('(color-gamut: srgb)').matches ? 'srgb' : null;
   var profile = {
     screenWidth: screen.width, screenHeight: screen.height,
     availWidth: screen.availWidth, availHeight: screen.availHeight,
+    availTop: screen.availTop, availLeft: screen.availLeft,
+    colorDepth: screen.colorDepth, pixelDepth: screen.pixelDepth,
     innerWidth: innerWidth, innerHeight: innerHeight,
     outerWidth: outerWidth, outerHeight: outerHeight,
     dpr: window.devicePixelRatio,
@@ -621,7 +781,53 @@ function deviceProfile() {
     webglExtCount: gl.extCount == null ? null : gl.extCount,
     webglHash: gl.hash || gl.err || null,
     fontCount: fonts.count, fontHash: fonts.hash,
-    fontPref: JSON.stringify(prefs)
+    fontPref: JSON.stringify(prefs),
+    fontGameCount: gFonts.length, fontGameNames: gFonts.join(','),
+    fontGamePref: JSON.stringify(gPrefs),
+    canvasGameHash: gCanvas.hash, canvasGameLen: gCanvas.len,
+    webglVersion: gGl.version || null, webglShading: gGl.shading || null,
+    webglExts: (gGl.extensions || []).join(','),
+    webglParams: JSON.stringify(gGl.parameters || {}),
+    webglPrecisions: JSON.stringify(gGl.precisions || {}),
+    webglAttrs: JSON.stringify(gGl.attributes || {}),
+    mathFp: JSON.stringify(gMath),
+    architecture: (function () {
+      try {
+        var f = new Float32Array(1), b = new Uint8Array(f.buffer);
+        f[0] = Infinity; f[0] = f[0] - f[0];
+        return b[3];
+      } catch (e) { return null; }
+    })(),
+    audioBaseLatency: (function () {
+      try {
+        if (!window.AudioContext) return null;
+        var ctx = new AudioContext(), v = ctx.baseLatency;
+        if (ctx.close) ctx.close();
+        return v;
+      } catch (e) { return null; }
+    })(),
+    vendor: navigator.vendor || null,
+    cookiesEnabled: navigator.cookieEnabled,
+    pdfViewerEnabled: navigator.pdfViewerEnabled,
+    applePay: (function () {
+      try {
+        var s = window.ApplePaySession;
+        if (typeof (s && s.canMakePayments) !== 'function') return -1;
+        return s.canMakePayments() ? 1 : 0;
+      } catch (e) { return -2; }
+    })(),
+    sessionStorage: probeStorage(sessionStorage),
+    localStorage: probeStorage(localStorage),
+    indexedDB: !!window.indexedDB,
+    openDatabase: !!window.openDatabase,
+    touchEvent: 'ontouchstart' in window,
+    hdr: matchMedia('(dynamic-range: high)').matches,
+    reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+    contrast: matchMedia('(prefers-contrast: more)').matches,
+    invertedColors: matchMedia('(inverted-colors: inverted)').matches,
+    forcedColors: matchMedia('(forced-colors: active)').matches,
+    monochrome: matchMedia('(monochrome)').matches,
+    reducedTransparency: matchMedia('(prefers-reduced-transparency: reduce)').matches
   };
   if (navigator.permissions) {
     ['geolocation', 'camera', 'microphone', 'notifications'].forEach(function (n) {
@@ -679,7 +885,10 @@ function profileHtml(o){
       ['可用', pair(o,'availWidth','availHeight')],
       ['窗口', pair(o,'innerWidth','innerHeight')],
       ['外框', pair(o,'outerWidth','outerHeight')],
-      ['像素比', o.dpr]
+      ['像素比', o.dpr],
+      ['色深', o.colorDepth],
+      ['像素深', o.pixelDepth],
+      ['可用原点', pair(o, 'availLeft', 'availTop')]
     ]],
     ['处理器', [
       ['核数', o.hwConcurrency],
@@ -712,6 +921,36 @@ function profileHtml(o){
       ['音频和', o.audioSum],
       ['字体', (o.fontCount==null?'—':o.fontCount)+'  '+(o.fontHash||'')],
       ['字体宽度', o.fontPref]
+    ]],
+    ['游戏采集', [
+      ['扩展名', o.webglExts],
+      ['WebGL 版本', o.webglVersion],
+      ['着色语言', o.webglShading],
+      ['WebGL 参数', o.webglParams],
+      ['着色精度', o.webglPrecisions],
+      ['上下文', o.webglAttrs],
+      ['游戏 Canvas', (o.canvasGameHash||'—')+'  '+(o.canvasGameLen==null?'':o.canvasGameLen)],
+      ['游戏字体', (o.fontGameCount==null?'—':o.fontGameCount)+(o.fontGameNames?('  '+o.fontGameNames):'')],
+      ['游戏字宽', o.fontGamePref],
+      ['数学', o.mathFp],
+      ['架构字节', o.architecture],
+      ['音频延迟', o.audioBaseLatency],
+      ['vendor', o.vendor],
+      ['PDF', o.pdfViewerEnabled],
+      ['Cookie', o.cookiesEnabled],
+      ['Apple Pay', o.applePay],
+      ['session', o.sessionStorage],
+      ['local', o.localStorage],
+      ['indexedDB', o.indexedDB],
+      ['openDatabase', o.openDatabase],
+      ['触摸事件', o.touchEvent],
+      ['HDR', o.hdr],
+      ['减弱动态', o.reducedMotion],
+      ['对比度', o.contrast],
+      ['反色', o.invertedColors],
+      ['强制颜色', o.forcedColors],
+      ['单色', o.monochrome],
+      ['减弱透明', o.reducedTransparency]
     ]],
     ['权限', [
       ['定位', o.perm_geolocation],
