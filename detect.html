@@ -1,0 +1,575 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CollectLab · wepoker-h5 detect</title>
+<style>
+body{margin:0;font:12px "PingFang SC","Hiragino Sans GB",-apple-system,sans-serif;background:#0b0b0d;color:#e8e8ea}
+h3{margin:10px 8px 4px;font-size:11px;color:#8ab4ff;letter-spacing:.04em}
+pre{padding:0 8px 8px;white-space:pre-wrap;font-size:11px;color:#9fe89f}
+table{border-collapse:collapse;margin:0 8px 12px;font-size:11px}
+td,th{padding:1px 6px;border-bottom:1px solid #1e1e24;text-align:left;font-weight:400}
+th{color:#8ab4ff}
+.ok{color:#6ee07a}.bad{color:#ff6b6b;font-weight:600}.na{color:#8a8a95}
+.bar{position:fixed;bottom:0;left:0;right:0;background:#141418;border-top:1px solid #26262c;padding:6px;font-size:11px;color:#9a9aa5}
+input,button{font:12px "PingFang SC","Hiragino Sans GB",-apple-system,sans-serif;margin:2px 4px;padding:6px;background:#141418;color:#e8e8ea;border:1px solid #2c2c34;border-radius:4px}
+</style></head>
+<body>
+<h3>WEPOKER-H5 注入检测（GC html5 2.19.2 复刻）</h3>
+<div id="top" style="padding:0 8px;color:#ffd479;font-size:11px">running…</div>
+<div id="tbl" style="padding:0 8px"></div>
+<h3>登录表单行为（KYC signals）</h3>
+<form id="form" autocomplete="on">
+  <input name="username" autocomplete="username" placeholder="用户名">
+  <input type="email" name="email" autocomplete="email" placeholder="邮箱">
+  <input type="password" name="password" autocomplete="current-password" placeholder="密码">
+  <button type="submit">提交</button>
+</form>
+<pre id="o">…</pre>
+<div class="bar" id="bar">点几下表单、切一次后台，再点「重跑」看数值</div>
+<script>
+/* ============================================================
+   wepoker-h5 = 游戏 main_bundle.js + GeoComply H5 SDK gc-html5.js
+   本页按 gc-html5.js 的原始实现复刻检测项（键名保持一致）：
+   d3 / D7 / R8           —— 原生函数与 getter 检查
+   o7J / l0y / W5U / f8O  —— 环境与内置对象被改写检查
+   g$N                    —— iframe 里取 self getter 的 toString
+   a2g / D4H              —— location / navigator 外形检查
+   G6Y                    —— 定位完整性扫描（同 timestamp / 瞬时返回）
+   S4r + i1n              —— 登录表单行为打分
+   r3l                    —— 触摸采集（radiusX / radiusY / speed）
+   ============================================================ */
+var qs=new URLSearchParams(location.search);
+var tag=qs.get('tag')||'detect';
+var ep=qs.get('ep')||'';
+var quiet=qs.get('noreport')==='1';
+var wantGeo=qs.get('geo')==='1';
+var inject=qs.get('jsinject')||'';        // ua,platform,geo,tostring,touch,canvas
+var scanCount=parseInt(qs.get('n')||'3',10);
+var scanTimeout=parseInt(qs.get('t')||'5000',10);
+
+var now=function(){return performance.timeOrigin+performance.now();};
+var r4=function(v){return (typeof v==='number'&&isFinite(v))?Math.round(v*10000)/10000:null;};
+var TOS=Function.prototype.toString, GOPD=Object.getOwnPropertyDescriptor;
+
+/* ---- GC 原文助手 ---- */
+function d3(fn,dflt){ try{ return fn(); }catch(e){ return dflt===undefined?0:dflt; } }
+function D7(fn){ try{ return TOS.call(fn).includes('native code')?1:0; }catch(e){ return 0; } }
+function R8(proto,name){ try{ var d=GOPD(proto,name); return (d&&d.get)?D7(d.get):0; }catch(e){ return 0; } }
+
+/* ---- 可选：模拟 JS 注入，用来验证检测项真的会亮红 ---- */
+(function applyInject(){
+  var parts=inject.split(',').filter(Boolean);
+  if(parts.indexOf('ua')>=0){
+    try{ var desc=GOPD(Navigator.prototype,'userAgent')||{configurable:true};
+      Object.defineProperty(Navigator.prototype,'userAgent',{configurable:desc.configurable!==false,
+        enumerable:desc.enumerable!==false,get:function(){return 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6.1 Mobile/15E148 Safari/604.1';}});
+    }catch(e){}
+  }
+  if(parts.indexOf('platform')>=0){
+    try{ Object.defineProperty(Navigator.prototype,'platform',{configurable:true,get:function(){return 'iPhone';}}); }catch(e){}
+  }
+  if(parts.indexOf('touch')>=0){
+    try{ Object.defineProperty(Navigator.prototype,'maxTouchPoints',{configurable:true,get:function(){return 5;}}); }catch(e){}
+  }
+  if(parts.indexOf('geo')>=0 && navigator.geolocation){
+    try{
+      var g=navigator.geolocation, orig=g.getCurrentPosition;
+      g.getCurrentPosition=function(ok,err,opt){
+        return orig.call(g,function(p){
+          var c={latitude:22.5431,longitude:114.0579,accuracy:5,altitude:null,altitudeAccuracy:null,
+                 heading:null,speed:null};
+          ok({coords:c,timestamp:1700000000000});
+        },err,opt);
+      };
+    }catch(e){}
+  }
+  if(parts.indexOf('tostring')>=0){
+    try{ var fns=new WeakSet();
+      Function.prototype.toString=function(){ return fns.has(this)?'function () { [native code] }':TOS.call(this); };
+    }catch(e){}
+  }
+})();
+
+/* ---- f8O：navigator / screen getter 原生性 ---- */
+function f8O(){
+  var N=d3(function(){return navigator.constructor.prototype;},null);
+  var S=d3(function(){return screen.constructor.prototype;},null);
+  return {
+    toString_self_native: d3(function(){return D7(Function.prototype.toString);}),
+    toString_honest: d3(function(){return 1-D7(function(){});}),
+    userAgent_getter_native: N?d3(function(){return R8(N,'userAgent');}):0,
+    hardwareConcurrency_getter_native: N?d3(function(){return R8(N,'hardwareConcurrency');}):0,
+    languages_getter_native: N?d3(function(){return R8(N,'languages');}):0,
+    platform_getter_native: N?d3(function(){return R8(N,'platform');}):0,
+    vendor_getter_native: N?d3(function(){return R8(N,'vendor');}):0,
+    maxTouchPoints_getter_native: N?d3(function(){return R8(N,'maxTouchPoints');}):0,
+    width_getter_native: S?d3(function(){return R8(S,'width');}):0,
+    height_getter_native: S?d3(function(){return R8(S,'height');}):0
+  };
+}
+
+/* ---- o7J：内置对象被改写检查 ---- */
+async function o7J(){
+  var J='_gc_p_', B='{"a":1}';
+  var out={
+    json_parse_native:D7(JSON&&JSON.parse),
+    json_parse_correct:d3(function(){return JSON.parse(B).a===1?1:0;}),
+    json_stringify_native:D7(JSON&&JSON.stringify),
+    json_stringify_correct:d3(function(){return JSON.stringify({a:1})===B?1:0;}),
+    array_map_native:D7(Array&&Array.prototype&&Array.prototype.map),
+    array_map_correct:d3(function(){return [1,2,3].map(function(x){return x*2;})[0]===2?1:0;}),
+    array_filter_native:D7(Array&&Array.prototype&&Array.prototype.filter),
+    array_filter_correct:d3(function(){return [1,2,3].filter(function(x){return x>1;})[0]===2?1:0;}),
+    object_defineProperty_native:D7(Object&&Object.defineProperty),
+    object_defineProperty_enforces_nonwritable:d3(function(){
+      var o={}; Object.defineProperty(o,'__gc_p_x',{value:1,writable:false,configurable:true});
+      try{o.__gc_p_x=2;}catch(e){} return o.__gc_p_x===1?1:0;}),
+    object_getOwnPropertyDescriptor_native:D7(Object&&Object.getOwnPropertyDescriptor),
+    object_getOwnPropertyDescriptor_accurate:d3(function(){
+      var o={}; Object.defineProperty(o,'y',{value:2,writable:false,configurable:true});
+      var d=Object.getOwnPropertyDescriptor(o,'y'); return d&&d.writable===false?1:0;}),
+    reflect_get_correct:d3(function(){return (window.Reflect&&Reflect.get({a:1},'a')===1)?1:0;}),
+    reflect_apply_correct:d3(function(){return (window.Reflect&&Reflect.apply(Math.max,null,[1,2])===2)?1:0;}),
+    proxy_constructor_native:D7(window.Proxy),
+    cookie_getter_native:d3(function(){
+      var p=GOPD(Document.prototype,'cookie')?Document.prototype:Object.getPrototypeOf(document);
+      return p?R8(p,'cookie'):0;}),
+    cookie_getter_consistent:d3(function(){
+      var n=J+Math.random().toString(36).slice(2), v=n+'=1; path=/';
+      try{ document.cookie=v; return document.cookie.indexOf(n)!==-1?1:0; }
+      finally{ document.cookie=n+'=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/'; }}),
+    localStorage_rw_faithful:d3(function(){
+      var k=J+Math.random().toString(36).slice(2); localStorage.setItem(k,'1');
+      var ok=localStorage.getItem(k)==='1'; localStorage.removeItem(k); return ok?1:0;}),
+    performance_now_native:D7(performance&&performance.now),
+    performance_now_monotonic:d3(function(){var a=performance.now(),b=performance.now();return b>=a?1:0;}),
+    performance_timeOrigin_valid:d3(function(){return (typeof performance.timeOrigin==='number'&&performance.timeOrigin>0)?1:0;}),
+    date_perf_clock_drift_ms:d3(function(){return Math.round(Math.abs(Date.now()-(performance.timeOrigin+performance.now())));},0),
+    crypto_getRandomValues_native:D7(crypto&&crypto.getRandomValues),
+    crypto_getRandomValues_entropy_ok:d3(function(){
+      var a=new Uint32Array(4); crypto.getRandomValues(a);
+      return (a[0]!==0||a[1]!==0||a[2]!==0||a[3]!==0)?1:0;}),
+    crypto_randomUUID_unique:d3(function(){return crypto.randomUUID&&crypto.randomUUID()!==crypto.randomUUID()?1:0;})
+  };
+  var md=navigator.mediaDevices, stable=0, count=0;
+  if(md&&md.enumerateDevices){
+    try{
+      var p=await Promise.all([md.enumerateDevices(),md.enumerateDevices()]);
+      count=p[0].length===p[1].length?1:0; stable=1;
+      for(var i=0;i<p[0].length&&i<p[1].length;i++){ if(p[0][i].groupId!==p[1][i].groupId){stable=0;break;} }
+    }catch(e){}
+  }
+  out.media_groupId_stable=stable; out.media_count_stable=count;
+  return out;
+}
+
+/* ---- l0y：fetch / XHR 被包装检查 ---- */
+async function l0y(){
+  var out={fetch_native:D7(window.fetch),fetch_clone_consistent:0,
+    request_url_getter_native:0,request_headers_getter_native:0,request_body_getter_native:0,
+    response_ok_contract_correct:0,response_headers_getter_native:0,
+    xhr_open_native:0,xhr_send_native:0,xhr_setRequestHeader_native:0,
+    xhr_responseText_getter_native:0,xhr_response_getter_native:0};
+  try{
+    var body='gc_probe_body', r=new Request('https://example.com',{method:'POST',body:body}), c=r.clone();
+    var t=await Promise.all([r.text(),c.text()]);
+    out.fetch_clone_consistent=(t[0]===body&&t[1]===body)?1:0;
+  }catch(e){}
+  var RP=d3(function(){return Request.prototype;},null);
+  if(RP){ out.request_url_getter_native=d3(function(){return R8(RP,'url');});
+          out.request_headers_getter_native=d3(function(){return R8(RP,'headers');});
+          out.request_body_getter_native=d3(function(){return R8(RP,'body');}); }
+  try{
+    var ok=new Response(null,{status:200}).ok, bad=new Response(null,{status:404}).ok;
+    out.response_ok_contract_correct=(ok===true&&bad===false)?1:0;
+  }catch(e){}
+  var SP=d3(function(){return Response.prototype;},null);
+  if(SP) out.response_headers_getter_native=d3(function(){return R8(SP,'headers');});
+  var X=d3(function(){return XMLHttpRequest.prototype;},null);
+  if(X){
+    out.xhr_open_native=D7(X.open);
+    out.xhr_send_native=D7(X.send);
+    out.xhr_setRequestHeader_native=D7(X.setRequestHeader);
+    out.xhr_responseText_getter_native=d3(function(){return R8(X,'responseText');});
+    out.xhr_response_getter_native=d3(function(){return R8(X,'response');});
+  }
+  return out;
+}
+
+/* ---- W5U：引擎特征一致性 ---- */
+function engineStack(s){
+  if(!s) return 'unknown';
+  if(s.indexOf('at ')>=0) return 'V8';
+  if(s.indexOf('@')>=0) return s.indexOf('global code')>=0?'JSC':'SpiderMonkey';
+  return 'unknown';
+}
+function W5U(){
+  var out={};
+  out.error_stack_format=d3(function(){return engineStack(new Error().stack);},'unknown');
+  out.css_property_count=d3(function(){
+    var d=document.createElement('div'); (document.body||document.documentElement).appendChild(d);
+    try{ return getComputedStyle(d).length||0; } finally{ d.remove(); }},0);
+  out.css_webkit_supported=d3(function(){return (CSS&&CSS.supports('-webkit-line-clamp','3'))?1:0;});
+  out.css_moz_supported=d3(function(){return (CSS&&CSS.supports('-moz-appearance','none'))?1:0;});
+  out.intl_format_ua_match=d3(function(){return new Intl.DateTimeFormat().format?1:0;});
+  out.regexp_named_groups_supported=d3(function(){
+    var m='test'.match(/(?<x>t)/); return (m&&m.groups&&m.groups.x==='t')?1:0;});
+  return out;
+}
+
+/* ---- g$N：iframe 里看 self getter 的 toString ---- */
+function iframeSelf(){
+  return new Promise(function(resolve){
+    var out={riskScore:0,value:null};
+    try{
+      var f=document.createElement('iframe');
+      f.srcdoc='geocomply'; f.style.display='none';
+      (document.body||document.documentElement).appendChild(f);
+      var done=false;
+      var fin=function(){
+        if(done) return; done=true;
+        try{
+          var w=f.contentWindow;
+          if(!w){ resolve(out); return; }
+          var d=GOPD(w,'self'), v=null;
+          if(d&&d.get){
+            var src=d.get.toString();
+            if(src.indexOf('native code')<0) v=src.slice(0,100);
+          }
+          out={riskScore:v?1:0,value:v};
+        }catch(e){ out={riskScore:0,value:'encountered error'}; }
+        finally{ try{f.remove();}catch(e){} }
+        resolve(out);
+      };
+      f.onload=fin; setTimeout(fin,500);
+    }catch(e){ resolve({riskScore:0,value:'encountered error'}); }
+  });
+}
+
+/* ---- a2g：location / document 外形 ---- */
+function locationSuite(){
+  var out={};
+  out.location_class=d3(function(){
+    return Object.prototype.toString.call(window.location).replace(/^\[object /,'').replace(/\]$/,'');},'unknown');
+  out.location_class_ok=out.location_class==='Location'?1:0;
+  out.location_toString_native=d3(function(){return D7(window.Location.prototype.toString);});
+  out.location_descriptor_type=d3(function(){
+    var d=GOPD(window,'location');
+    if(!d) return 'unknown';
+    if(typeof d.get==='function') return 'native_getter';
+    if(d.value!==void 0) return 'value_prop';
+    return 'unknown';},'unknown');
+  out.document_url_eq_location_href=d3(function(){return document.URL===location.href?1:0;});
+  out.nav_entry_url_eq_location_href=d3(function(){
+    var e=performance.getEntriesByType&&performance.getEntriesByType('navigation');
+    if(!e||!e.length) return 1;
+    return e[0].name===location.href?1:0;});
+  out.protocol=d3(function(){return location.protocol;},'');
+  out.in_iframe=d3(function(){return top!==window?1:0;});
+  out.has_opener=d3(function(){return window.opener?1:0;});
+  out.is_secure_context=d3(function(){return window.isSecureContext?1:0;});
+  out.cross_origin_isolated=d3(function(){return window.crossOriginIsolated?1:0;});
+  out.history_length=d3(function(){return history.length||0;},0);
+  out.document_referrer=d3(function(){return document.referrer||'';},'');
+  /* D4H 里与注入相关的几项 */
+  out.webdriver=d3(function(){return navigator.webdriver?1:0;});
+  out.errorToSource=d3(function(){ var s=false; try{ throw ''; }catch(e){ try{ e.toSource(); s=true; }catch(x){} } return s?1:0;});
+  out.touch_support=d3(function(){return (('ontouchstart' in window)||navigator.maxTouchPoints>0||navigator.msMaxTouchPoints>0)?1:0;});
+  /* v1n：getCurrentPosition.toString() 必须逐字等于原生串 */
+  out.geolocation_toString=d3(function(){
+    return navigator.geolocation.getCurrentPosition.toString().replace(/\r?\n|\r/g,' ').replace(/\s\s+/g,' ').trim();},'');
+  out.geolocation_toString_native=(out.geolocation_toString==='function getCurrentPosition() { [native code] }')?1:0;
+  out.plugins_present=d3(function(){return navigator.plugins.length?1:0;});
+  out.mimeTypes_present=d3(function(){return navigator.mimeTypes.length?1:0;});
+  return out;
+}
+
+/* ---- G6Y：定位完整性扫描 ---- */
+function oneFix(timeout){
+  return new Promise(function(resolve){
+    var t0=now();
+    if(!navigator.geolocation){ resolve({ok:false,ms:0,code:'no-geo'}); return; }
+    var settled=false;
+    var fin=function(r){ if(settled) return; settled=true; resolve(r); };
+    setTimeout(function(){ fin({ok:false,ms:now()-t0,code:'timeout'}); },timeout+50);
+    try{
+      navigator.geolocation.getCurrentPosition(function(p){
+        fin({ok:true,ms:now()-t0,timestamp:p.timestamp,
+             lat:r4(p.coords.latitude),lon:r4(p.coords.longitude),
+             acc:r4(p.coords.accuracy),alt:r4(p.coords.altitude),
+             altAcc:r4(p.coords.altitudeAccuracy),heading:r4(p.coords.heading),
+             speed:r4(p.coords.speed),
+             keys:Object.keys(p.coords).join(','),
+             altitude_null:p.coords.altitude===null,
+             has_toJSON:typeof p.coords.toJSON==='function'});
+      },function(e){ fin({ok:false,ms:now()-t0,code:e.code,msg:e.message}); },
+      {enableHighAccuracy:true,maximumAge:0,timeout:timeout});
+    }catch(e){ fin({ok:false,ms:now()-t0,code:'throw'}); }
+  });
+}
+/* T3q：25 次串行 getCurrentPosition（timeout 10ms、高精度、maximumAge 0）
+   判定：>=80% 在 10ms 内返回 且 无拒绝/超时 且 25 个 timestamp 全同 → spoofed */
+function oneScan(){
+  return new Promise(function(resolve){
+    var t0=now();
+    if(!navigator.geolocation){ resolve({ms:0}); return; }
+    var settled=false;
+    var fin=function(r){ if(settled) return; settled=true; resolve(r); };
+    setTimeout(function(){ fin({ms:now()-t0,isTimeout:true}); },200);
+    try{
+      navigator.geolocation.getCurrentPosition(function(p){
+        fin({ms:now()-t0,coords:p.coords,timestamp:p.timestamp,
+             lat:r4(p.coords.latitude),lon:r4(p.coords.longitude),acc:r4(p.coords.accuracy),
+             alt:r4(p.coords.altitude),altAcc:r4(p.coords.altitudeAccuracy),
+             heading:r4(p.coords.heading),speed:r4(p.coords.speed),
+             keys:Object.keys(p.coords).join(','),altitude_null:p.coords.altitude===null});
+      },function(e){ fin({ms:now()-t0,isDenied:e.code===e.PERMISSION_DENIED,isTimeout:e.code===e.TIMEOUT,code:e.code}); },
+      {enableHighAccuracy:true,timeout:10,maximumAge:0});
+    }catch(e){ fin({ms:now()-t0,code:'throw'}); }
+  });
+}
+async function geoScan(count,timeout){
+  count=count||25;
+  var scans=[], firstTs=null, sameTs=0, denied=0, timeouts=0, coordsOk=0, sample=null, series=[];
+  for(var i=0;i<count;i++){
+    var r=await oneScan();
+    scans.push(Math.round(r.ms));
+    if(r.coords){
+      if(!sample) sample=r;
+      coordsOk++;
+      series.push({acc:r.acc,alt:r.alt,altAcc:r.altAcc,lat:r.lat,lon:r.lon,ts:r.timestamp});
+      if(firstTs!==null && r.timestamp===firstTs) sameTs++;
+      firstTs=r.timestamp;
+    } else if(r.isDenied) denied++;
+    else if(r.isTimeout) timeouts++;
+  }
+  var fastRatio=scans.filter(function(ms){return ms<10;}).length/count;
+  var spoofed=(fastRatio>0.8 && denied===0 && timeouts===0 && sameTs===count-1)?1:0;
+  return {count:count,same_timestamp_count:sameTs,timeout_count:timeouts,denied_count:denied,
+          coords_count:coordsOk,fast_ratio:r4(fastRatio),instant_success_count:scans.filter(function(ms){return ms<=1;}).length,
+          scanning:scans.join(','),spoofed:spoofed,sample:sample,series:series};
+}
+
+/* ---- 定位漂移序列：与真机对比逐次精度变化（宽松超时，非 SDK 的 10ms 扫描） ---- */
+async function geoDrift(count){
+  var out=[];
+  for(var i=0;i<count;i++){
+    var r = await new Promise(function(resolve){
+      var settled=false, t0=now();
+      var fin=function(v){ if(settled) return; settled=true; resolve(v); };
+      setTimeout(function(){ fin({ok:false,ms:Math.round(now()-t0),reason:'timeout'}); }, 4000);
+      try{
+        navigator.geolocation.getCurrentPosition(function(p){
+          fin({ok:true,ms:Math.round(now()-t0),acc:r4(p.coords.accuracy),alt:r4(p.coords.altitude),
+               altAcc:r4(p.coords.altitudeAccuracy),lat:r4(p.coords.latitude),lon:r4(p.coords.longitude),
+               ts:p.timestamp});
+        },function(e){ fin({ok:false,ms:Math.round(now()-t0),reason:'code='+e.code}); },
+        {enableHighAccuracy:true,maximumAge:0,timeout:4000});
+      }catch(e){ fin({ok:false,ms:0,reason:'throw'}); }
+    });
+    out.push(r);
+    await new Promise(function(r){ setTimeout(r, 700); });
+  }
+  return out;
+}
+
+/* ---- 触摸采集（r3l 同款字段） ---- */
+var touchBuf=[], touchDetail=[], radiusHist={}, lastTouch={};
+['touchstart','touchmove','touchend'].forEach(function(type){
+  window.addEventListener(type,function(e){
+    var t=e.changedTouches&&e.changedTouches[0]; if(!t) return;
+    var ts=now(), prev=lastTouch[t.identifier]||{ts:ts,x:t.clientX,y:t.clientY};
+    var dt=Math.max(ts-prev.ts,1), dx=t.clientX-prev.x, dy=t.clientY-prev.y;
+    var rec={type:type,ts:r4(ts),dt:r4(dt),x:r4(t.clientX),y:r4(t.clientY),dx:r4(dx),dy:r4(dy),
+      speed:r4(Math.sqrt(dx*dx+dy*dy)/dt),radiusX:r4(t.radiusX),radiusY:r4(t.radiusY),
+      force:r4(t.force),touches:e.touches.length,eventAge:r4(Math.max(0,now()-(e.timeStamp||ts)))};
+    lastTouch[t.identifier]={ts:ts,x:t.clientX,y:t.clientY};
+    if(type==='touchstart'&&rec.radiusX!=null) radiusHist[rec.radiusX]=(radiusHist[rec.radiusX]||0)+1;
+    touchDetail.push(rec); if(touchDetail.length>20) touchDetail.shift();
+    touchBuf.push(rec); if(touchBuf.length>60) touchBuf.shift();
+  },{passive:true,capture:true});
+});
+
+/* ---- S4r + i1n：登录表单行为 ---- */
+var IDENT=new Set(['ssn','national_id','dob','date_of_birth','last_name','surname','first_name','full_name','name','address','passport','license']);
+var FORM={fields:Object.create(null),pointerMoved:false,focusSwitches:0,formStartTs:now(),formEndTs:now(),
+  iframeBlocked:false,automationHints:{webdriver:!!navigator.webdriver,headless:/headless/i.test(navigator.userAgent)}};
+var elKeys=new WeakMap(), elSeq=0;
+function elKey(el){
+  try{ var v=el.getAttribute&&(el.getAttribute('name')||el.getAttribute('id')); if(v) return v; }catch(e){}
+  var k=elKeys.get(el); if(k===undefined){ k='el#'+(elSeq++); elKeys.set(el,k); } return k;
+}
+function roleOf(el){
+  try{
+    var ac=(el.getAttribute('autocomplete')||'').toLowerCase();
+    var direct={username:'name',email:'email',tel:'phone','current-password':'other','new-password':'other'};
+    if(ac&&direct[ac]) return direct[ac];
+    var hay=((el.getAttribute('name')||'')+' '+(el.getAttribute('id')||'')+' '+
+             (el.getAttribute('placeholder')||'')+' '+(el.getAttribute('aria-label')||'')).toLowerCase();
+    if(/passport/.test(hay)) return 'passport';
+    if(/national.?id|id.?number/.test(hay)) return 'national_id';
+    if(/\bssn|social/.test(hay)) return 'ssn';
+    if(/date.?of.?birth|\bdob\b/.test(hay)) return 'date_of_birth';
+    if(/last.?name|surname/.test(hay)) return 'last_name';
+    if(/first.?name|given/.test(hay)) return 'first_name';
+    if(/full.?name/.test(hay)) return 'full_name';
+    if(/address/.test(hay)) return 'address';
+    if(/user.?name|nick.?name|display.?name|screen.?name/.test(hay)) return 'name';
+    if(/mail/.test(hay)) return 'email';
+    if(/phone|mobile|tel/.test(hay)) return 'phone';
+    var t=(el.getAttribute('type')||'').toLowerCase();
+    if(t==='email') return 'email';
+    if(t==='tel') return 'phone';
+  }catch(e){}
+  return 'other';
+}
+function fieldOf(el){
+  var k=elKey(el);
+  if(!FORM.fields[k]) FORM.fields[k]={el:el,role:roleOf(el),pasted:false,keystrokes:0,backspaces:0,reEdits:0,autofilled:false,prevLen:0,focusCount:0};
+  return FORM.fields[k];
+}
+function targetOf(e){
+  try{ var p=e.composedPath&&e.composedPath(); if(p&&p.length) for(var i=0;i<p.length;i++){ if(p[i]&&p[i].nodeType===1) return p[i]; } }catch(x){}
+  return e.target;
+}
+['paste','keydown','input','pointermove','animationstart'].forEach(function(type){
+  document.addEventListener(type,function(e){
+    var el=targetOf(e); if(!el||!('tagName' in el)) return;
+    var f=fieldOf(el);
+    if(type==='paste'){ f.pasted=true; FORM.formEndTs=now(); }
+    else if(type==='keydown'){ f.keystrokes++; if(e.key==='Backspace'){ f.backspaces++; f.reEdits++; } FORM.formEndTs=now(); }
+    else if(type==='input'){
+      var len=typeof el.value==='string'?el.value.length:0, delta=len-(f.prevLen||0); f.prevLen=len;
+      if(!e.isComposing&&!f.pasted&&(delta>=2||e.inputType==='insertReplacementText')) f.autofilled=true;
+      FORM.formEndTs=now();
+    }
+    else if(type==='pointermove'){ FORM.pointerMoved=true; }
+    else if(type==='animationstart'){
+      if(e.animationName==='signals-bx-autofill') f.autofilled=true;
+    }
+  },true);
+});
+document.addEventListener('focusin',function(e){ var el=targetOf(e); if(el&&el.tagName&&/INPUT|TEXTAREA/.test(el.tagName)) fieldOf(el).focusCount++; },true);
+document.addEventListener('visibilitychange',function(){ if(document.hidden) FORM.focusSwitches++; });
+(function autofillStyle(){
+  try{
+    var s=document.createElement('style');
+    s.textContent='@keyframes signals-bx-autofill{from{outline:0}to{outline:0}}'+
+      'input:-webkit-autofill,textarea:-webkit-autofill,select:-webkit-autofill,input:autofill,textarea:autofill,select:autofill{animation-name:signals-bx-autofill;animation-duration:1ms}';
+    document.head.appendChild(s);
+  }catch(e){}
+})();
+function behaviorSignals(){
+  var fields=Object.keys(FORM.fields).map(function(k){return FORM.fields[k];});
+  var pastedFields=fields.filter(function(f){return f.pasted&&IDENT.has(f.role);}).map(function(f){return f.role;});
+  var pasteIntoIdentity=pastedFields.length>0;
+  var reEdits=fields.reduce(function(a,f){return a+f.reEdits;},0);
+  var autofillUsed=fields.some(function(f){return f.autofilled;});
+  var ms=Math.max(0,FORM.formEndTs-FORM.formStartTs);
+  var identCount=fields.filter(function(f){return IDENT.has(f.role);}).length;
+  var suspected=FORM.automationHints.webdriver||FORM.automationHints.headless||
+    (!FORM.pointerMoved&&identCount>0&&ms>0&&ms<1200);
+  var score=1;
+  if(pasteIntoIdentity) score-=0.5;
+  if(suspected) score-=0.5;
+  if(!FORM.pointerMoved) score-=0.2;
+  if(FORM.focusSwitches>2) score-=0.2;
+  if(reEdits>5) score-=0.1;
+  if(identCount>0&&ms>0&&ms<1500) score-=0.3;
+  score=Math.max(0,Math.min(1,score));
+  return {
+    behavior_paste_into_identity:pasteIntoIdentity,
+    behavior_paste_fields:pastedFields,
+    behavior_typing_familiarity:Number(score.toFixed(2)),
+    behavior_form_completion_ms:ms,
+    behavior_pointer_motion_present:FORM.pointerMoved,
+    behavior_focus_switch_count:FORM.focusSwitches,
+    behavior_autofill_used:autofillUsed,
+    behavior_automation_suspected:suspected,
+    behavior_re_edit_count:reEdits,
+    behavior_iframe_blocked:Boolean(FORM.iframeBlocked),
+    fields:fields.map(function(f){return {role:f.role,keystrokes:f.keystrokes,backspaces:f.backspaces,pasted:f.pasted,autofilled:f.autofilled};})
+  };
+}
+
+/* ---- 汇总 ---- */
+var snap={};
+function report(){
+  var payload=JSON.stringify({tag:tag,kind:'detect',ts:new Date().toISOString(),
+    page:{charset:document.characterSet,title:document.title,h1:(document.querySelector('h3')||{}).textContent||''},
+    ua:navigator.userAgent,checks:snap.checks||{},hooks:snap.hooks||{},env:snap.env||{},
+    iframeSelf:snap.iframeSelf||{},geoScan:snap.geoScan||{},
+    behavior:behaviorSignals(),
+    geoDrift:snap.geoDrift||[],
+    touch:(function(){ var h={}; Object.keys(radiusHist).forEach(function(k){h[k]=radiusHist[k];}); return {radiusX:h,recent:touchBuf.slice(-10)}; })()});
+  if(quiet) return;
+  try{ if(ep) fetch(ep,{method:'POST',cache:'no-store',body:payload}).catch(function(){});
+       else fetch('https://ntfy.sh/collectlab-7f3a91c2d4',{method:'POST',cache:'no-store',body:payload}).catch(function(){}); }catch(e){}
+}
+function row(k,v){
+  var cls='', shown=v;
+  if(typeof v==='number'){ cls=v?'ok':'bad'; }
+  else if(typeof v==='boolean'){ cls=v?'bad':'ok'; }
+  else if(v==='native_getter'){ cls='ok'; }
+  else if(v==='value_prop'||v==='unknown'){ cls='bad'; }
+  if(v===null||v===undefined){ shown='—'; cls='na'; }
+  return '<tr><td>'+k+'</td><td class="'+cls+'">'+shown+'</td></tr>';
+}
+function render(){
+  var groups=[['hooks','原生性 / 内置对象'],['checks','location / navigator'],['env','引擎与环境'],['iframeSelf','iframe self'],['geoScan','定位扫描']];
+  var html='';
+  if((snap.geoDrift||[]).length){
+    html+='<h3>定位漂移（连续 6 次）</h3><table><tr><th>#</th><th>acc</th><th>alt</th><th>altAcc</th><th>ms</th></tr>';
+    snap.geoDrift.forEach(function(r,i){
+      html+='<tr><td>'+(i+1)+'</td><td>'+(r.acc==null?'—':r.acc)+'</td><td>'+(r.alt==null?'—':r.alt)+
+            '</td><td>'+(r.altAcc==null?'—':r.altAcc)+'</td><td>'+(r.ms||'')+'</td></tr>';
+    });
+    html+='</table>';
+  }
+  if(touchDetail.length){
+    html+='<h3>触摸（最近 '+touchDetail.length+' 次）</h3><table><tr><th>type</th><th>radiusX</th><th>radiusY</th><th>force</th><th>dt</th><th>x/y</th></tr>';
+    touchDetail.slice(-8).forEach(function(t){
+      html+='<tr><td>'+t.type+'</td><td>'+t.radiusX+'</td><td>'+t.radiusY+'</td><td>'+t.force+
+            '</td><td>'+t.dt+'</td><td>'+t.x+'/'+t.y+'</td></tr>';
+    });
+    html+='</table>';
+  }
+  groups.forEach(function(g){
+    var o=snap[g[0]]; if(!o) return;
+    html+='<h3>'+g[1]+'</h3><table>';
+    Object.keys(o).forEach(function(k){
+      var v=o[k];
+      if(typeof v==='object') v=JSON.stringify(v);
+      html+=row(k,v);
+    });
+    html+='</table>';
+  });
+  document.getElementById('tbl').innerHTML=html;
+  var bad=0,tot=0;
+  ['hooks','checks','env'].forEach(function(g){
+    var o=snap[g]||{};
+    Object.keys(o).forEach(function(k){
+      var v=o[k];
+      if(typeof v==='number'&&!/(_drift_ms|_count|history_length|css_property_count)/.test(k)){ tot++; if(!v) bad++; }
+    });
+  });
+  document.getElementById('top').textContent='tag='+tag+'  非原生/被改写项: '+bad+' / 检查项: '+tot+
+    (inject?'   jsinject='+inject:'')+(wantGeo?'   geo=1':'');
+}
+async function run(){
+  snap={};
+  snap.hooks=Object.assign(f8O(),await o7J(),await l0y());
+  snap.checks=locationSuite();
+  snap.env=W5U();
+  snap.iframeSelf=await iframeSelf();
+  if(wantGeo){ snap.geoScan=await geoScan(scanCount,scanTimeout); snap.geoDrift=await geoDrift(6); }
+  render(); report();
+}
+document.getElementById('form').addEventListener('submit',function(e){ e.preventDefault(); report(); });
+run();
+setInterval(function(){ report(); },4000);
+document.addEventListener('visibilitychange',function(){ if(document.hidden) report(); });
+setInterval(function(){
+  document.getElementById('o').textContent=JSON.stringify(behaviorSignals(),null,1);
+},1000);
+</script></body></html>
