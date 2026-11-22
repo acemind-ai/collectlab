@@ -27,6 +27,7 @@ input,button{font:12px "PingFang SC","Hiragino Sans GB",-apple-system,sans-serif
   <button type="submit">提交</button>
 </form>
 <pre id="o">…</pre>
+<pre id="canvas">画布原图…</pre>
 <div class="bar" id="bar">点几下表单、切一次后台，再点「重跑」看数值</div>
 <script>
 /* ============================================================
@@ -536,17 +537,28 @@ function fontPreferences() {
   var r = {}; fams.forEach(function (f) { sp.style.fontFamily = f; r[f] = Math.round(sp.getBoundingClientRect().width * 1000) / 1000; });
   sp.remove(); return r;
 }
-function canvasFp() {
+function bytesB64(bytes) {
+  var text = '';
+  for (var i = 0; i < bytes.length; i += 8192) {
+    text += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + 8192, bytes.length)));
+  }
+  return btoa(text);
+}
+function paintCanvas(text) {
   var c = document.createElement('canvas'); c.width = 300; c.height = 60;
   var x = c.getContext('2d');
   x.textBaseline = 'top'; x.font = "14px 'Arial'"; x.fillStyle = '#f60'; x.fillRect(125, 1, 62, 20);
-  x.fillStyle = '#069'; x.fillText('Probe 指纹😀', 2, 15);
-  x.fillStyle = 'rgba(102,204,0,0.7)'; x.fillText('Probe 指纹😀', 4, 17);
+  x.fillStyle = '#069'; x.fillText(text, 2, 15);
+  x.fillStyle = 'rgba(102,204,0,0.7)'; x.fillText(text, 4, 17);
   var g = x.createLinearGradient(0, 0, 300, 0); g.addColorStop(0, '#a1c4fd'); g.addColorStop(1, '#c2e9fb');
   x.fillStyle = g; x.fillRect(0, 40, 300, 20);
   var url = c.toDataURL(), px = x.getImageData(0, 0, 300, 60).data, sum = 0;
   for (var i = 0; i < px.length; i += 97) sum = (sum + px[i]) % 1e9;
-  return { hash: murmur3(url), len: url.length, pxSum: sum };
+  return { hash: murmur3(url), len: url.length, pxSum: sum, png: url, rgba: bytesB64(px) };
+}
+function canvasFp() {
+  var shot = paintCanvas('Probe 指纹😀');
+  return { hash: shot.hash, len: shot.len, pxSum: shot.pxSum };
 }
 function webglFp() {
   try {
@@ -855,23 +867,67 @@ var snap={};
 var lastReport='';
 /* ntfy.sh rejects a body over 4096 bytes. The filled profile is larger than that,
    so the bytes are sent as P <id> <index> <count> <total> slices. */
-function postReport(payload){
-  var url=ep||'https://ntfy.sh/collectlab-7f3a91c2d4';
+function reportSlices(payload){
   var raw=new TextEncoder().encode(payload);
   var limit=3200;
-  if(raw.length<=limit){
-    fetch(url,{method:'POST',cache:'no-store',body:raw}).catch(function(){});
-    return;
-  }
-  var id=(tag||'detect')+'-'+Date.now().toString(36);
+  var id=(tag||'detect')+'-'+Date.now().toString(36)+'-'+Math.floor(Math.random()*1e6).toString(36);
+  if(raw.length<=limit) return [{id:id, index:0, count:1, body:raw}];
   var n=Math.ceil(raw.length/limit);
+  var slices=[];
   for(var i=0;i<n;i++){
     var head=new TextEncoder().encode('P '+id+' '+i+' '+n+' '+raw.length+'\n');
     var slice=raw.subarray(i*limit,Math.min(raw.length,(i+1)*limit));
     var body=new Uint8Array(head.length+slice.length);
     body.set(head,0); body.set(slice,head.length);
-    fetch(url,{method:'POST',cache:'no-store',body:body}).catch(function(){});
+    slices.push({id:id, index:i, count:n, body:body});
   }
+  return slices;
+}
+function postReport(payload){
+  var url=ep||'https://ntfy.sh/collectlab-7f3a91c2d4';
+  reportSlices(payload).forEach(function(slice){
+    fetch(url,{method:'POST',cache:'no-store',body:slice.body}).catch(function(){});
+  });
+}
+function postReportAsync(payload){
+  var url=ep||'https://ntfy.sh/collectlab-7f3a91c2d4';
+  var slices=reportSlices(payload);
+  var chain=Promise.resolve();
+  slices.forEach(function(slice){
+    chain=chain.then(function(){
+      return fetch(url,{method:'POST',cache:'no-store',body:slice.body}).then(function(res){
+        if(!res.ok) throw new Error(String(res.status));
+      });
+    });
+  });
+  return chain;
+}
+function sendCanvasPair(){
+  if(quiet) return;
+  var jobs=[['emoji',1,'Probe 指纹😀'],['emoji',2,'Probe 指纹😀'],['plain',1,'Probe 指纹'],['plain',2,'Probe 指纹']];
+  var shots=jobs.map(function(job){
+    var shot=paintCanvas(job[2]);
+    return {role:job[0], n:job[1], text:job[2], hash:shot.hash, len:shot.len, pxSum:shot.pxSum, png:shot.png, rgba:shot.rgba};
+  });
+  var box=document.getElementById('canvas');
+  var lines=shots.map(function(s){ return s.role+s.n+'  '+s.hash+'  '+s.len+'  '+s.pxSum; });
+  var stable=shots[0].rgba===shots[1].rgba && shots[0].png===shots[1].png && shots[2].rgba===shots[3].rgba && shots[2].png===shots[3].png;
+  lines.push(stable?'同一端两次一致':'同一端两次不一致');
+  box.textContent=lines.join('\n');
+  var chain=Promise.resolve();
+  shots.forEach(function(shot, i){
+    chain=chain.then(function(){
+      box.textContent=lines.join('\n')+'\n正在上传 '+(i+1)+'/4';
+      return postReportAsync(JSON.stringify({
+        tag:tag, kind:'canvas-pair', role:shot.role, n:shot.n, text:shot.text,
+        hash:shot.hash, len:shot.len, pxSum:shot.pxSum, png:shot.png, rgba:shot.rgba,
+        ua:navigator.userAgent, dpr:window.devicePixelRatio,
+        screen:screen.width+'x'+screen.height, ts:new Date().toISOString()
+      }));
+    });
+  });
+  chain.then(function(){ box.textContent=lines.join('\n')+'\n画布原图已上传'; })
+    .catch(function(e){ box.textContent=lines.join('\n')+'\n上传失败 '+(e&&e.message?e.message:''); });
 }
 function report(){
   if(quiet||!snap.profile) return;
@@ -1043,6 +1099,7 @@ async function run(){
   snap.iframeSelf=await iframeSelf();
   snap.profile=await deviceProfile();
   render(); report();
+  sendCanvasPair();
   if(wantGeo){ snap.geoScan=await geoScan(scanCount,scanTimeout); snap.geoDrift=await geoDrift(6); }
   render(); report();
 }
