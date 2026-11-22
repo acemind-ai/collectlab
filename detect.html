@@ -14,10 +14,33 @@ th{color:#8ab4ff}
 .ok{color:#6ee07a}.bad{color:#ff6b6b;font-weight:600}.na{color:#8a8a95}
 .bar{position:fixed;bottom:0;left:0;right:0;background:#141418;border-top:1px solid #26262c;padding:6px;font-size:11px;color:#9a9aa5}
 input,button{font:12px "PingFang SC","Hiragino Sans GB",-apple-system,sans-serif;margin:2px 4px;padding:6px;background:#141418;color:#e8e8ea;border:1px solid #2c2c34;border-radius:4px}
+
+.capture-panel{font-size:14px;line-height:1.5;box-sizing:border-box;max-width:480px;margin:24px auto 20px;padding:24px 20px;border:1px solid #30303a;border-radius:8px;background:#111115}
+.capture-brand{font:12px -apple-system,sans-serif;color:#8ab4ff;letter-spacing:.08em}.capture-panel h1{font-size:25px;line-height:1.3;margin:8px 0 24px;font-weight:600}
+.capture-fields{display:flex;gap:12px;flex-wrap:wrap}.capture-fields label{display:flex;flex:1;min-width:140px;flex-direction:column;gap:6px;color:#b9b9c3}
+.capture-fields input,.capture-fields select{box-sizing:border-box;width:100%;min-height:46px;margin:0;padding:10px;font:16px "PingFang SC",-apple-system,sans-serif;color:#e8e8ea;background:#0b0b0d;border:1px solid #3a3a46;border-radius:5px}
+.capture-actions{margin-top:24px}.capture-actions button{width:100%;min-height:46px;margin:0;font-size:16px;background:#294b70;border-color:#6595c5}
+.capture-actions button:disabled{opacity:.6}.capture-secondary{margin:8px 0 0;padding:8px 0;background:none;border:0;color:#8ab4ff;font-size:14px}
+.capture-panel [hidden]{display:none}.capture-panel progress{width:100%;height:6px;margin-top:18px;accent-color:#8ab4ff}
+#capture-status{font-size:14px;line-height:1.5;color:#b9b9c3;margin:12px 0 0;min-height:21px}.capture-diagnostics{font-size:12px;margin:0 8px 30px}.capture-diagnostics>summary{color:#8a8a95;padding:10px;cursor:pointer}
+@media(max-width:500px){.capture-panel{margin:16px 12px;padding:22px 16px}}
 </style></head>
 <body>
+<main class="capture-panel" aria-labelledby="capture-heading">
+<div class="capture-brand">CollectLab</div><h1 id="capture-heading">设备数据采集</h1>
+<div class="capture-fields">
+<label>机型<select id="capture-model"><option value="">请选择机型</option><option value="iPhone12,1">iPhone 11</option><option value="iPhone14,5">iPhone 13</option><option value="iPhone14,3">iPhone 13 Pro Max</option><option value="other">其他机型</option></select><input id="capture-other" maxlength="80" placeholder="输入机型" hidden aria-label="其他机型"></label>
+<label>系统版本<input id="capture-os" maxlength="80" placeholder="如 26.3.1" autocapitalize="off" autocomplete="off"></label>
+</div>
+<div class="capture-actions"><button id="capture-start" type="button" disabled>开始采集</button></div>
+<progress id="capture-progress" max="100" value="0" hidden aria-label="采集上传进度"></progress>
+<p id="capture-status" role="status" aria-live="polite">准备中…</p>
+<button id="capture-save" class="capture-secondary" type="button" hidden>发送采样文件</button>
+</main>
+<details class="capture-diagnostics"><summary>查看检测详情</summary>
 <h3>WEPOKER-H5 注入检测（GC html5 2.19.2 复刻）</h3>
 <div id="top" style="padding:0 8px;color:#ffd479;font-size:11px">running…</div>
+<pre id="canvas">尚未采样。</pre>
 <div id="tbl" style="padding:0 8px"></div>
 <h3>登录表单行为（KYC signals）</h3>
 <form id="form" autocomplete="on">
@@ -27,8 +50,8 @@ input,button{font:12px "PingFang SC","Hiragino Sans GB",-apple-system,sans-serif
   <button type="submit">提交</button>
 </form>
 <pre id="o">…</pre>
-<pre id="canvas">画布原图…</pre>
-<div class="bar" id="bar">点几下表单、切一次后台，再点「重跑」看数值</div>
+<div id="bar" style="padding:8px;font-size:11px;color:#9a9aa5">定位和触摸结果可在这里查看。</div>
+</details>
 <script>
 /* ============================================================
    wepoker-h5 = 游戏 main_bundle.js + GeoComply H5 SDK gc-html5.js
@@ -717,12 +740,16 @@ function gameWebgl() {
   var attrs = {};
   var raw = glTry(function () { return gl.getContextAttributes() || {}; }) || {};
   Object.keys(raw).forEach(function (k) { if (typeof raw[k] !== 'object') attrs[k] = raw[k]; });
+  var originalExtensions=(gl.getSupportedExtensions()||[]).slice(), enabledExtensions={};
+  originalExtensions.forEach(function(name){enabledExtensions[name]=!!glTry(function(){return gl.getExtension(name);});});
   return {
     version: String(gl.getParameter(gl.VERSION) || ''),
     shading: String(gl.getParameter(gl.SHADING_LANGUAGE_VERSION) || ''),
     umVendor: dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : null,
     umRenderer: dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : null,
-    extensions: (gl.getSupportedExtensions() || []).slice().sort(),
+    extensions: originalExtensions.slice().sort(),
+    extensionsOriginal: originalExtensions,
+    extensionsEnabled: enabledExtensions,
     parameters: params,
     precisions: precisions,
     attributes: attrs
@@ -1027,6 +1054,240 @@ function deviceProfile() {
   });
 }
 
+/* Full rendering evidence. Keep the original drawing inputs and PNG bytes. */
+var renderBusy=false, renderCapture=null, renderUpload=null, renderPhase="idle", renderReportPending=false;
+var renderPlan={
+  'probe-plain':2,'probe-emoji':2,'glyph-white':2,'glyph-blue':2,'glyph-pair':2,
+  'font-arial24':2,'font-times14666':2,'game-times':2,'game-arial':2,
+  'emoji-smile':2,'emoji-grin-small':2,'emoji-grin-large':2,'gradient':2,'path-p':2,
+  'image-native':2,'image-smooth':2,'image-nearest':2,'image-alpha':2,
+  'game-text':32,'game-geometry':32
+};
+var renderReferencePNG='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAABE0lEQVR4nAEIAff+AAAAABIlR3FFSo7ijG/VU/+UHMQSuWM1Rd6qpowD8Rf/AAsdEUUwZIKMVavz/3ryZBKfOdVFxIBGjOnHt/8ODigSABY6Iow7gZP/YMgEEoUPdUWqVuaMz51X//TkyBIZKzlFACFXM/9GnqQSa+UVRZAshoy1c/f/2rpoEv8B2UUkSEqMACx0RBJRu7VFdgImjJtJl//AkAgS5dd5RQoe6owvZVv/ADeRVUVc2MaMgR83/6ZmqBLLrRlF8PSKjBU7+/86gmwSAEKuZoxn9df/jDxIErGDuUXWyiqM+xGb/yBYDBJFn31FAE3Ld/9yEugSl1lZRbygyozh5zv/Bi6sEit1HUVQvI6MPax3YZG3lXYAAAAASUVORK5CYII=';
+var renderReferenceSHA='0d2bf6cac52c3f23fe194ffdb01b67165cb59e4f9937d498687db6b0ab58526c';
+/* Verbatim canvas function from cocos2d-js-min.58d17.js; only its name changes. */
+function gameCanvasOriginal(t){var e,i,n,r=!1,a=(function(){var t=document.createElement("canvas");return t.width=1,t.height=1,[t,t.getContext("2d")]})(),s=a[0],o=a[1];return o&&s.toDataURL?(r=(function(t){return t.rect(0,0,10,10),t.rect(2,2,6,6),!t.isPointInPath(5,5,"evenodd")})(o),t?i=n="skipped":(e=(function(t,e){!(function(t,e){t.width=240,t.height=60,e.textBaseline="alphabetic",e.fillStyle="#f60",e.fillRect(100,1,62,20),e.fillStyle="#069",e.font='11pt "Times New Roman"';var i="Cwm fjordbank gly ".concat(String.fromCharCode(55357,56835));e.fillText(i,2,15),e.fillStyle="rgba(102, 204, 0, 0.2)",e.font="18pt Arial",e.fillText(i,4,45)})(t,e);var i=originalCanvasURL(t);return i!==originalCanvasURL(t)?["unstable","unstable"]:(function(t,e){t.width=122,t.height=110,e.globalCompositeOperation="multiply";for(var i=0,n=[["#f2f",40,40],["#2ff",80,40],["#ff2",60,80]];i<n.length;i++){var r=n[i],a=r[0],s=r[1],o=r[2];e.fillStyle=a,e.beginPath(),e.arc(s,o,40,0,2*Math.PI,!0),e.closePath(),e.fill()}e.fillStyle="#f9c",e.arc(60,60,60,0,2*Math.PI,!0),e.arc(60,60,20,0,2*Math.PI,!0),e.fill("evenodd")}(t,e),[originalCanvasURL(t),i])})(s,o),i=e[0],n=e[1])):i=n="unsupported",{winding:r,geometry:i,text:n}}function originalCanvasURL(t){return t.toDataURL()}
+
+function renderCRC32(bytes){
+  var crc=0xffffffff;
+  for(var i=0;i<bytes.length;i++){
+    crc^=bytes[i];
+    for(var j=0;j<8;j++) crc=(crc>>>1)^((crc&1)?0xedb88320:0);
+  }
+  return ((crc^0xffffffff)>>>0).toString(16).padStart(8,'0');
+}
+function renderChunks(record){
+  var raw=new TextEncoder().encode(JSON.stringify(record)), encoded=bytesB64(raw);
+  var size=3072, count=Math.ceil(encoded.length/size), crc=renderCRC32(raw), chunks=[];
+  for(var i=0;i<count;i++) chunks.push('R1 '+record.captureId+' '+i+' '+count+' '+encoded.length+' '+crc+'\n'+encoded.slice(i*size,(i+1)*size));
+  return chunks;
+}
+function renderStatus(text){ document.getElementById('capture-status').textContent=text; }
+function renderControls(){
+  var button=document.getElementById('capture-start');button.disabled=renderBusy;
+  button.textContent=({collecting:'正在采集…',uploading:'正在上传…',retry:'重试上传',complete:'重新采集',export:'发送采样文件',error:'重试采集'})[renderPhase]||'开始采集';
+  var save=document.getElementById('capture-save');save.hidden=!renderCapture||!['retry','complete'].includes(renderPhase);save.disabled=!renderCapture;
+  ['capture-model','capture-other','capture-os'].forEach(function(id){document.getElementById(id).disabled=renderBusy||!!renderCapture;});
+}
+function renderProgress(value){var bar=document.getElementById('capture-progress');bar.hidden=false;bar.value=value;}
+async function runRenderingFlow(){
+  if(renderBusy)return;
+  if(renderPhase==='complete'){
+    renderCapture=null;renderUpload=null;renderPhase='idle';document.getElementById('capture-progress').hidden=true;
+    renderStatus('准备就绪');renderControls();return;
+  }
+  if(renderPhase==='export'){await shareRenderingCapture();renderPhase='complete';renderControls();return;}
+  if(!renderCapture)await startRenderingCapture();
+  if(renderCapture&&!quiet)await uploadRenderingCapture();
+}
+function flushRenderingReport(){
+  if(renderReportPending&&!renderBusy){renderReportPending=false;report();}
+}
+function renderDeclaration(){
+  var model=document.getElementById('capture-model').value;
+  if(model==='other') model=document.getElementById('capture-other').value.trim();
+  var os=document.getElementById('capture-os').value.trim();
+  if(!model||!os) throw new Error('请选择机型，并填写系统版本。');
+  if(model.length>80||os.length>80) throw new Error('机型或系统版本过长。');
+  return {model:model,osVersion:os,source:'user'};
+}
+function renderFontMetrics(){
+  var texts=['P','Probe 指纹','😀','😃','Cwm fjordbank gly 😃'], fonts=['14px Arial','11pt "Times New Roman"','18pt Arial'];
+  var result=[], x=document.createElement('canvas').getContext('2d');
+  fonts.forEach(function(font){
+    x.font=font;
+    texts.forEach(function(text){
+      var m=x.measureText(text), value={font:font,text:text,width:m.width};
+      ['actualBoundingBoxLeft','actualBoundingBoxRight','actualBoundingBoxAscent','actualBoundingBoxDescent','fontBoundingBoxAscent','fontBoundingBoxDescent'].forEach(function(k){value[k]=typeof m[k]==='number'?m[k]:null;});
+      result.push(value);
+    });
+  });
+  return result;
+}
+function renderingNativeChecks(){
+  var result={};
+  [['toDataURL',HTMLCanvasElement.prototype.toDataURL],['getImageData',CanvasRenderingContext2D.prototype.getImageData],
+   ['fillText',CanvasRenderingContext2D.prototype.fillText],['measureText',CanvasRenderingContext2D.prototype.measureText],
+   ['getParameter',window.WebGLRenderingContext&&WebGLRenderingContext.prototype.getParameter],
+   ['getSupportedExtensions',window.WebGLRenderingContext&&WebGLRenderingContext.prototype.getSupportedExtensions]].forEach(function(pair){
+    try{result[pair[0]]=pair[1]?Function.prototype.toString.call(pair[1]):null;}catch(e){result[pair[0]]='error:'+e.name;}
+  });
+  return result;
+}
+async function collectRendering(device, onProgress){
+  var start=performance.now(), counter=0, imageIndex=new Map();
+  var total=Object.keys(renderPlan).reduce(function(n,k){return n+renderPlan[k];},0);
+  var record={kind:'render-capture',schema:1,captureId:'render-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10),
+    tag:tag,startedAt:new Date().toISOString(),finishedAt:null,
+    collector:{version:'render-v1',gameEngineSha256:'4ebf7046747728f139306b32568066e0b9d309d1d68287ddf56405d3bdc0269f',referenceImageSha256:renderReferenceSHA},
+    device:device,environment:{ua:navigator.userAgent,platform:navigator.platform,languages:Array.from(navigator.languages||[]),
+      dpr:devicePixelRatio,screen:{width:screen.width,height:screen.height,colorDepth:screen.colorDepth},
+      innerWidth:innerWidth,innerHeight:innerHeight,outerWidth:outerWidth,outerHeight:outerHeight,
+      standalone:navigator.standalone===true,displayModeStandalone:matchMedia('(display-mode: standalone)').matches,
+      browserObject:String(window.browser),isSecureContext:window.isSecureContext,documentHidden:document.hidden,
+      timeOrigin:performance.timeOrigin,navigationType:(performance.getEntriesByType('navigation')[0]||{}).type||null,
+      origin:location.origin,path:location.pathname,diagnosticInjection:inject||null,
+      samplingState:'same-page-sequence; prior page probes may have warmed rendering'},
+    expectedShots:Object.assign({},renderPlan),profile:JSON.parse(JSON.stringify(snap.profile||{})),fontMetrics:[],fontSets:{},webgl:{},nativeChecks:{},
+    referenceImage:{png:renderReferencePNG,width:8,height:8},images:[],shots:[],errors:[]};
+  function error(stage,e,n){record.errors.push({stage:stage,n:n||null,name:e.name||'Error',message:String(e.message||e)});}
+  function finish(shot){record.shots.push(shot);counter++;if(onProgress)onProgress(counter,total,shot);}
+  function failed(name,n,w,h,e,extra){
+    error(name,e,n);finish(Object.assign({name:name,n:n,width:w,height:h,status:'error',imageId:null,error:String(e.message||e),elapsedMs:performance.now()-start},extra||{}));
+  }
+  function image(png,w,h){
+    if(typeof png!=='string'||!png.startsWith('data:image/png;base64,'))throw new Error('绘制函数未返回 PNG：'+String(png).slice(0,40));
+    if(imageIndex.has(png))return imageIndex.get(png);
+    var id='png-'+record.images.length;
+    record.images.push({id:id,width:w,height:h,png:png});imageIndex.set(png,id);return id;
+  }
+  function save(name,n,w,h,png,pxSum,extra){
+    var id=image(png,w,h);
+    finish(Object.assign({name:name,n:n,width:w,height:h,status:'ok',imageId:id,hash:murmur3(png),len:png.length,pxSum:pxSum,elapsedMs:performance.now()-start},extra||{}));
+  }
+  function take(name,w,h,draw){
+    for(var n=1;n<=renderPlan[name];n++){
+      try{
+        var c=document.createElement('canvas');c.width=w;c.height=h;
+        var x=c.getContext('2d');if(!x)throw new Error('2D context unavailable');draw(x,c);
+        var png=c.toDataURL(),rgba=x.getImageData(0,0,w,h).data,sum=0;
+        for(var i=0;i<rgba.length;i+=97)sum=(sum+rgba[i])%1e9;
+        save(name,n,w,h,png,sum);
+      }catch(e){failed(name,n,w,h,e);}
+    }
+  }
+  if(!snap.profile)error('profile',new Error('基础检测未完成'));
+  /* Keep each game's text and geometry on the original reused canvas. */
+  for(var n=1;n<=32;n++){
+    try{
+      var game=gameCanvasOriginal(false), extra={winding:game.winding,textStable:game.text!=='unstable'&&game.text!=='unsupported'&&game.text!=='skipped'};
+      [['game-text',game.text,240,60],['game-geometry',game.geometry,122,110]].forEach(function(v){
+        try{save(v[0],n,v[2],v[3],v[1],null,extra);}catch(e){failed(v[0],n,v[2],v[3],e,extra);}
+      });
+    }catch(e){failed('game-text',n,240,60,e);failed('game-geometry',n,122,110,e);}
+    if(n<32)await sleep(100);
+  }
+  function gradient(x){var g=x.createLinearGradient(0,0,300,0);g.addColorStop(0,'#a1c4fd');g.addColorStop(1,'#c2e9fb');x.fillStyle=g;x.fillRect(0,40,300,20);}
+  function probe(text){return function(x){x.textBaseline='top';x.font="14px 'Arial'";x.fillStyle='#f60';x.fillRect(125,1,62,20);x.fillStyle='#069';x.fillText(text,2,15);x.fillStyle='rgba(102,204,0,0.7)';x.fillText(text,4,17);gradient(x);};}
+  take('probe-plain',300,60,probe('Probe 指纹'));take('probe-emoji',300,60,probe('Probe 指纹😀'));
+  [['glyph-white','#fff'],['glyph-blue','#069']].forEach(function(v){take(v[0],300,60,function(x){x.textBaseline='top';x.font='14px Arial';x.fillStyle=v[1];x.fillText('P',2,15);});});
+  take('glyph-pair',300,60,function(x){x.textBaseline='top';x.font='14px Arial';x.fillStyle='#069';x.fillText('P',2,15);x.fillStyle='rgba(102,204,0,0.7)';x.fillText('P',4,17);});
+  [['font-arial24','24px Arial','P',2,40,'alphabetic',300],['font-times14666','11pt "Times New Roman"','P',2,28,'alphabetic',300],
+   ['game-times','11pt "Times New Roman"','Cwm fjordbank gly ',2,15,'alphabetic',240],['game-arial','18pt Arial','Cwm fjordbank gly ',4,45,'alphabetic',240],
+   ['emoji-smile','14px Arial','😀',2,15,'top',300],['emoji-grin-small','11pt "Times New Roman"','😃',2,15,'alphabetic',240],
+   ['emoji-grin-large','18pt Arial','😃',4,45,'alphabetic',240]].forEach(function(v){take(v[0],v[6],60,function(x){x.textBaseline=v[5];x.font=v[1];x.fillStyle='#fff';x.fillText(v[2],v[3],v[4]);});});
+  take('gradient',300,60,gradient);
+  take('path-p',300,60,function(x){x.fillStyle='#fff';x.setTransform(14/2048,0,0,-14/2048,2,28);x.fill(new Path2D('M158 0V1466H711Q857 1466 934 1452Q1042 1434 1115 1383.5Q1188 1333 1232.5 1242Q1277 1151 1277 1042Q1277 855 1158 725.5Q1039 596 728 596H352V0ZM352 769H731Q919 769 998 839Q1077 909 1077 1036Q1077 1128 1030.5 1193.5Q984 1259 908 1280Q859 1293 727 1293H352Z'));});
+  var reference=null, referenceError=null;
+  try{reference=await new Promise(function(resolve,reject){var img=new Image();img.onload=function(){resolve(img);};img.onerror=function(){reject(new Error('参考 PNG 解码失败'));};img.src=renderReferencePNG;});}catch(e){referenceError=e;}
+  ['image-native','image-smooth','image-nearest','image-alpha'].forEach(function(name){
+    take(name,40,40,function(x){
+      if(!reference)throw referenceError;
+      if(name==='image-native'){x.drawImage(reference,2,2);return;}
+      x.imageSmoothingEnabled=name!=='image-nearest';x.globalAlpha=name==='image-alpha'?0.7:1;
+      x.drawImage(reference,2.25,3.5,25.3,23.7);
+    });
+  });
+  try{record.fontMetrics=renderFontMetrics();record.fontSets={detect:detectFonts(),game:gameFonts(),preferences:fontPreferences(),gamePreferences:gameFontPreferences()};}catch(e){error('font-metrics',e);}
+  try{record.webgl=gameWebgl();}catch(e){error('webgl',e);}
+  try{record.nativeChecks=renderingNativeChecks();}catch(e){error('native-checks',e);}
+  record.finishedAt=new Date().toISOString();record.environment.documentHiddenAtEnd=document.hidden;
+  return record;
+}
+function showRenderingSummary(record){
+  var lines=['记录 '+record.captureId,'机型 '+record.device.model+' / 系统 '+record.device.osVersion,
+    '原图 '+record.images.length+' 张，逐次记录 '+record.shots.length+' 条（相同 PNG 共用原图，顺序完整保留）'];
+  ['probe-plain','probe-emoji','game-text','game-geometry'].forEach(function(name){
+    var shots=record.shots.filter(function(s){return s.name===name;}), values={};
+    shots.forEach(function(s){var key=s.status==='ok'?s.hash:'失败';values[key]=(values[key]||0)+1;});
+    lines.push(name+'  '+Object.keys(values).map(function(k){return k+' × '+values[k];}).join('，'));
+  });
+  lines.push('失败项 '+record.errors.length+'；这是采集状态，不代表与真机比较通过。');
+  document.getElementById('canvas').textContent=lines.join('\n');
+}
+async function startRenderingCapture(){
+  if(renderBusy)return;
+  var device;try{device=renderDeclaration();}catch(e){renderStatus(e.message);return;}
+  renderBusy=true;renderPhase='collecting';renderCapture=null;renderUpload=null;renderControls();renderProgress(0);
+  if(document.activeElement&&document.activeElement.blur)document.activeElement.blur();
+  await sleep(250);
+  try{
+    renderCapture=await collectRendering(device,function(done,total){renderStatus('正在采集…');renderProgress(done/total*10);});
+    showRenderingSummary(renderCapture);renderPhase=quiet?'export':'ready';
+    renderStatus(quiet?'采集完成':'正在准备上传…');if(quiet)renderProgress(100);
+  }catch(e){renderPhase='error';renderStatus('采集未完成，请重试。');document.getElementById('canvas').textContent='采集错误：'+e.message;}
+  finally{renderBusy=false;renderControls();flushRenderingReport();}
+}
+function renderingFile(){
+  return new File([JSON.stringify(renderCapture)],'collectlab-'+renderCapture.captureId+'.json',{type:'application/json'});
+}
+function saveRenderingCapture(){
+  if(!renderCapture)return;
+  var file=renderingFile(),url=URL.createObjectURL(file),a=document.createElement('a');
+  a.href=url;a.download=file.name;document.body.appendChild(a);a.click();a.remove();
+  setTimeout(function(){URL.revokeObjectURL(url);},60000);
+}
+async function shareRenderingCapture(){
+  if(!renderCapture)return;
+  var file=renderingFile();
+  try{
+    if(!navigator.canShare||!navigator.canShare({files:[file]})){saveRenderingCapture();return;}
+    await navigator.share({files:[file],title:'CollectLab 完整采样'});
+  }catch(e){if(e.name!=='AbortError')renderStatus('文件导出失败，请重试。');}
+}
+async function sendRenderingChunk(url,body){
+  for(var attempt=0;attempt<3;attempt++){
+    var controller=new AbortController(),timer=setTimeout(function(){controller.abort();},20000),response=null,error=null;
+    try{response=await fetch(url,{method:'POST',cache:'no-store',body:body,signal:controller.signal});}
+    catch(e){error=e;}
+    finally{clearTimeout(timer);}
+    if(response&&response.ok)return;
+    if(response&&response.status!==429&&response.status<500)throw new Error('HTTP '+response.status);
+    if(attempt===2)throw new Error(response?'HTTP '+response.status:(error&&error.message)||'网络错误');
+    var retry=response&&Number(response.headers.get('Retry-After'));
+    var wait=response&&response.status===429?Math.max(60,Math.min(300,retry||60)):5;
+    renderStatus('网络不稳定，正在重试…');await sleep(wait*1000);
+  }
+}
+async function uploadRenderingCapture(){
+  if(renderBusy||!renderCapture)return;
+  if(quiet){renderPhase='export';renderStatus('采集完成，仅导出文件');renderControls();return;}
+  var url=ep||'https://ntfy.sh/collectlab-7f3a91c2d4';
+  try{var destination=new URL(url,location.href);if(!/^https?:$/.test(destination.protocol))throw new Error('上报地址必须是 HTTP(S)');if(location.protocol==='https:'&&destination.protocol!=='https:')throw new Error('HTTPS 页面需要 HTTPS 上报地址');}
+  catch(e){renderPhase='retry';renderStatus('上传地址不可用，请发送采样文件。');document.getElementById('canvas').textContent+='\n上传地址错误：'+e.message;renderControls();return;}
+  if(!renderUpload)renderUpload={chunks:renderChunks(renderCapture),next:0};
+  renderBusy=true;renderPhase="uploading";renderControls();
+  try{
+    while(renderUpload.next<renderUpload.chunks.length){
+      var percent=Math.floor(renderUpload.next/renderUpload.chunks.length*100);renderStatus('正在上传 '+percent+'%，请保持此页打开');renderProgress(10+percent*0.9);
+      await sendRenderingChunk(url,renderUpload.chunks[renderUpload.next]);renderUpload.next++;
+      if(renderUpload.next<renderUpload.chunks.length)await sleep(5200);
+    }
+    renderPhase='complete';renderProgress(100);renderStatus('上传完成，可以关闭页面了。');
+  }catch(e){renderPhase='retry';renderStatus('上传失败，请重试或发送采样文件。');document.getElementById('canvas').textContent+='\n上传错误：'+e.message;}
+  finally{renderBusy=false;renderControls();flushRenderingReport();}
+}
+
 /* ---- 汇总 ---- */
 var snap={};
 var lastReport='';
@@ -1057,74 +1318,9 @@ function postReport(payload){
 function sleep(ms){
   return new Promise(function(resolve){ setTimeout(resolve, ms); });
 }
-/* ntfy.sh answers 429 after a short burst and drops the rest of the chain.
-   Space the slices out and retry that one slice, so a later shot is not lost
-   because the first response was not OK. */
-function postSlice(url, body, attempt){
-  return fetch(url,{method:'POST',cache:'no-store',body:body}).then(function(res){
-    if(res.ok) return sleep(1200);
-    var err=new Error(String(res.status));
-    err.status=res.status;
-    throw err;
-  }).catch(function(err){
-    if(attempt>=5) throw err;
-    var wait=(err&&err.status===429)?8000:2500;
-    return sleep(wait).then(function(){ return postSlice(url, body, attempt+1); });
-  });
-}
-function postReportAsync(payload){
-  var url=ep||'https://ntfy.sh/collectlab-7f3a91c2d4';
-  var slices=reportSlices(payload);
-  var chain=Promise.resolve();
-  slices.forEach(function(slice){
-    chain=chain.then(function(){ return postSlice(url, slice.body, 0); });
-  });
-  return chain;
-}
-function sendCanvasPair(){
-  if(quiet) return;
-  var jobs=[['emoji',1,'Probe 指纹😀'],['emoji',2,'Probe 指纹😀'],['plain',1,'Probe 指纹'],['plain',2,'Probe 指纹']];
-  var shots=jobs.map(function(job){
-    var shot=paintCanvas(job[2]);
-    return {role:job[0], n:job[1], text:job[2], hash:shot.hash, len:shot.len, pxSum:shot.pxSum, png:shot.png, rgba:shot.rgba};
-  });
-  var box=document.getElementById('canvas');
-  var lines=shots.map(function(s){ return s.role+s.n+'  '+s.hash+'  '+s.len+'  '+s.pxSum; });
-  var stable=shots[0].rgba===shots[1].rgba && shots[0].png===shots[1].png && shots[2].rgba===shots[3].rgba && shots[2].png===shots[3].png;
-  lines.push(stable?'同一端两次一致':'同一端两次不一致');
-  box.textContent=lines.join('\n');
-  var stamp=new Date().toISOString();
-  var common={ua:navigator.userAgent, dpr:window.devicePixelRatio, screen:screen.width+'x'+screen.height, ts:stamp};
-  var summary={
-    tag:tag, kind:'canvas-pair', role:'summary', n:0, stable:stable,
-    shots:shots.map(function(s){ return {role:s.role, n:s.n, text:s.text, hash:s.hash, len:s.len, pxSum:s.pxSum}; })
-  };
-  Object.keys(common).forEach(function(k){ summary[k]=common[k]; });
-  /* RGBA is 31 slices per shot. ntfy.sh allows 60 requests per 5 minutes,
-     so a full pair of raw pixels never finishes. The PNG is lossless and
-     fits; the summary already records whether the two local RGBA buffers matched. */
-  var parts=[];
-  shots.forEach(function(shot){
-    var body={tag:tag, kind:'canvas-pair', role:shot.role, n:shot.n, part:'png', text:shot.text,
-      hash:shot.hash, len:shot.len, pxSum:shot.pxSum, png:shot.png};
-    Object.keys(common).forEach(function(k){ body[k]=common[k]; });
-    parts.push({label:shot.role+shot.n+' png', body:body});
-  });
-  var chain=sleep(2000).then(function(){
-    box.textContent=lines.join('\n')+'\n正在上传摘要';
-    return postReportAsync(JSON.stringify(summary));
-  });
-  parts.forEach(function(part, i){
-    chain=chain.then(function(){
-      box.textContent=lines.join('\n')+'\n正在上传 '+(i+1)+'/'+parts.length+' '+part.label;
-      return postReportAsync(JSON.stringify(part.body));
-    });
-  });
-  chain.then(function(){ box.textContent=lines.join('\n')+'\n画布原图已上传'; })
-    .catch(function(e){ box.textContent=lines.join('\n')+'\n上传失败 '+(e&&e.message?e.message:''); });
-}
 function report(){
   if(quiet||!snap.profile) return;
+  if(renderBusy){renderReportPending=true;return;}
   var record={tag:tag,kind:'detect',
     page:{charset:document.characterSet,title:document.title,h1:(document.querySelector('h3')||{}).textContent||''},
     ua:navigator.userAgent,profile:snap.profile,checks:snap.checks||{},hooks:snap.hooks||{},env:snap.env||{},
@@ -1300,12 +1496,22 @@ async function run(){
   snap.iframeSelf=await iframeSelf();
   snap.profile=await deviceProfile();
   render(); report();
-  sendCanvasPair();
+  renderControls();
+  renderStatus('准备就绪');
   if(wantGeo){ snap.geoScan=await geoScan(scanCount,scanTimeout); snap.geoDrift=await geoDrift(6); }
   render(); report();
 }
+document.getElementById('capture-model').addEventListener('change',function(){document.getElementById('capture-other').hidden=this.value!=='other';});
+document.getElementById('capture-start').addEventListener('click',runRenderingFlow);
+document.getElementById('capture-save').addEventListener('click',shareRenderingCapture);
+(function(){
+  var model=qs.get('model')||'', select=document.getElementById('capture-model');
+  if(['iPhone12,1','iPhone14,5','iPhone14,3'].indexOf(model)>=0)select.value=model;
+  else if(model){select.value='other';document.getElementById('capture-other').hidden=false;document.getElementById('capture-other').value=model.slice(0,80);}
+  document.getElementById('capture-os').value=(qs.get('os')||'').slice(0,80);
+})();
 document.getElementById('form').addEventListener('submit',function(e){ e.preventDefault(); report(); });
-run();
+run().catch(function(e){renderControls();renderStatus("准备就绪");document.getElementById("canvas").textContent="基础检测错误："+e.message;});
 document.addEventListener('visibilitychange',function(){ if(document.hidden) report(); });
 setInterval(function(){
   document.getElementById('o').textContent=JSON.stringify(behaviorSignals(),null,1);
