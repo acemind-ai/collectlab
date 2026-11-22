@@ -889,16 +889,30 @@ function postReport(payload){
     fetch(url,{method:'POST',cache:'no-store',body:slice.body}).catch(function(){});
   });
 }
+function sleep(ms){
+  return new Promise(function(resolve){ setTimeout(resolve, ms); });
+}
+/* ntfy.sh answers 429 after a short burst and drops the rest of the chain.
+   Space the slices out and retry that one slice, so a later shot is not lost
+   because the first response was not OK. */
+function postSlice(url, body, attempt){
+  return fetch(url,{method:'POST',cache:'no-store',body:body}).then(function(res){
+    if(res.ok) return sleep(1200);
+    var err=new Error(String(res.status));
+    err.status=res.status;
+    throw err;
+  }).catch(function(err){
+    if(attempt>=5) throw err;
+    var wait=(err&&err.status===429)?8000:2500;
+    return sleep(wait).then(function(){ return postSlice(url, body, attempt+1); });
+  });
+}
 function postReportAsync(payload){
   var url=ep||'https://ntfy.sh/collectlab-7f3a91c2d4';
   var slices=reportSlices(payload);
   var chain=Promise.resolve();
   slices.forEach(function(slice){
-    chain=chain.then(function(){
-      return fetch(url,{method:'POST',cache:'no-store',body:slice.body}).then(function(res){
-        if(!res.ok) throw new Error(String(res.status));
-      });
-    });
+    chain=chain.then(function(){ return postSlice(url, slice.body, 0); });
   });
   return chain;
 }
@@ -914,16 +928,31 @@ function sendCanvasPair(){
   var stable=shots[0].rgba===shots[1].rgba && shots[0].png===shots[1].png && shots[2].rgba===shots[3].rgba && shots[2].png===shots[3].png;
   lines.push(stable?'同一端两次一致':'同一端两次不一致');
   box.textContent=lines.join('\n');
-  var chain=Promise.resolve();
-  shots.forEach(function(shot, i){
+  var stamp=new Date().toISOString();
+  var common={ua:navigator.userAgent, dpr:window.devicePixelRatio, screen:screen.width+'x'+screen.height, ts:stamp};
+  var summary={
+    tag:tag, kind:'canvas-pair', role:'summary', n:0, stable:stable,
+    shots:shots.map(function(s){ return {role:s.role, n:s.n, text:s.text, hash:s.hash, len:s.len, pxSum:s.pxSum}; })
+  };
+  Object.keys(common).forEach(function(k){ summary[k]=common[k]; });
+  var parts=[];
+  shots.forEach(function(shot){
+    ['png','rgba'].forEach(function(part){
+      var body={tag:tag, kind:'canvas-pair', role:shot.role, n:shot.n, part:part, text:shot.text,
+        hash:shot.hash, len:shot.len, pxSum:shot.pxSum};
+      body[part]=shot[part];
+      Object.keys(common).forEach(function(k){ body[k]=common[k]; });
+      parts.push({label:shot.role+shot.n+' '+part, body:body});
+    });
+  });
+  var chain=sleep(2000).then(function(){
+    box.textContent=lines.join('\n')+'\n正在上传摘要';
+    return postReportAsync(JSON.stringify(summary));
+  });
+  parts.forEach(function(part, i){
     chain=chain.then(function(){
-      box.textContent=lines.join('\n')+'\n正在上传 '+(i+1)+'/4';
-      return postReportAsync(JSON.stringify({
-        tag:tag, kind:'canvas-pair', role:shot.role, n:shot.n, text:shot.text,
-        hash:shot.hash, len:shot.len, pxSum:shot.pxSum, png:shot.png, rgba:shot.rgba,
-        ua:navigator.userAgent, dpr:window.devicePixelRatio,
-        screen:screen.width+'x'+screen.height, ts:new Date().toISOString()
-      }));
+      box.textContent=lines.join('\n')+'\n正在上传 '+(i+1)+'/'+parts.length+' '+part.label;
+      return postReportAsync(JSON.stringify(part.body));
     });
   });
   chain.then(function(){ box.textContent=lines.join('\n')+'\n画布原图已上传'; })
