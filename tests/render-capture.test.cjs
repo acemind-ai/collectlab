@@ -7,7 +7,7 @@ const html=fs.readFileSync(path.join(__dirname,'..','detect.html'),'utf8');
 const source=html.slice(html.indexOf('/* Full rendering evidence.'),html.indexOf('/* ---- 汇总 ---- */'));
 function context(extra={}){
   const elements=new Map(), waits=[];
-  const c={TextEncoder,URL,AbortController,Map,Date,Math,Array,JSON,console,
+  const c={TextEncoder,URL,AbortController,Map,Date,Math,Array,JSON,console,btoa:text=>Buffer.from(text,'binary').toString('base64'),
     setTimeout:()=>1,clearTimeout:()=>{},tag:'测试-标签',quiet:false,ep:'http://localhost/upload',
     location:{href:'http://localhost/detect.html',protocol:'http:',origin:'http://localhost',pathname:'/detect.html'},
     navigator:{userAgent:'test',platform:'test',languages:['zh-CN'],standalone:false},screen:{width:390,height:844,colorDepth:24},
@@ -15,12 +15,12 @@ function context(extra={}){
     performance:{now:()=>1,timeOrigin:0,getEntriesByType:()=>[]},matchMedia:()=>({matches:false}),snap:{profile:{hwConcurrency:4}},
     document:{hidden:false,getElementById(id){if(!elements.has(id))elements.set(id,{textContent:'',disabled:false,value:''});return elements.get(id);}},
     bytesB64:bytes=>Buffer.from(bytes).toString('base64'),sleep:async ms=>{waits.push(ms);},...extra};
-  c.window=c;vm.createContext(c);vm.runInContext(source,c);c.elements=elements;c.waits=waits;return c;
+  c.window=c;vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'..','audio-capture.js'),'utf8'),c);vm.runInContext(source,c);c.elements=elements;c.waits=waits;return c;
 }
 function record(){return {captureId:'render-unicode',kind:'render-capture',schema:1,tag:'手机远程😀',data:'漢字'.repeat(4000)};}
-test('ASCII transport preserves Unicode exactly, including reversed fragments',()=>{
-  const c=context(),r=record(),chunks=c.renderChunks(r);
-  assert.equal(c.renderCRC32(new TextEncoder().encode('123456789')),'cbf43926');
+test('ASCII transport preserves Unicode exactly, including reversed fragments',async()=>{
+  const c=context(),r=record(),chunks=await c.CollectLabAudio.encodeChunks(r);
+  assert.equal(c.CollectLabAudio.crc32(new TextEncoder().encode('123456789')),'cbf43926');
   assert(chunks.length>2);const parts=[];
   for(const chunk of chunks.slice().reverse()){
     assert(Buffer.byteLength(chunk)<4096);assert(/^[\x00-\x7f]+$/.test(chunk));

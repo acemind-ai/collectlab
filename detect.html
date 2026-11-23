@@ -1,6 +1,7 @@
 <!doctype html><html lang="zh"><head><meta charset="utf-8">
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>CollectLab · wepoker-h5 detect</title>
 <style>
 body{margin:0;font:12px "PingFang SC","Hiragino Sans GB",-apple-system,sans-serif;background:#0b0b0d;color:#e8e8ea}
@@ -32,9 +33,17 @@ input,button{font:12px "PingFang SC","Hiragino Sans GB",-apple-system,sans-serif
 <label>机型<select id="capture-model"><option value="">请选择机型</option><option value="iPhone12,1">iPhone 11</option><option value="iPhone14,5">iPhone 13</option><option value="iPhone14,3">iPhone 13 Pro Max</option><option value="other">其他机型</option></select><input id="capture-other" maxlength="80" placeholder="输入机型" hidden aria-label="其他机型"></label>
 <label>系统版本<input id="capture-os" maxlength="80" placeholder="如 26.3.1" autocapitalize="off" autocomplete="off"></label>
 </div>
+<div class="capture-fields" style="margin-top:12px">
+<label>采集内容<select id="capture-kind"><option value="all">全部采集</option><option value="audio">音频与环境</option><option value="render">画布、字体与 WebGL</option></select></label>
+<label>设备类型<select id="capture-role"><option value="physical">真机</option><option value="simulator">模拟器</option></select></label>
+<label>系统构建号（选填）<input id="capture-build" maxlength="80" placeholder="如 23D771330a" autocapitalize="off" autocomplete="off"></label>
+</div>
+<p style="color:#9a9aa5;font-size:13px;margin:16px 0 0">系统版本请按设置中显示的完整内容填写，保留 (a) 等后缀。音频采样不录音，也不会播放声音。</p>
+<p id="capture-mode" style="color:#9a9aa5;font-size:13px;margin:8px 0 0"></p>
 <div class="capture-actions"><button id="capture-start" type="button" disabled>开始采集</button></div>
 <progress id="capture-progress" max="100" value="0" hidden aria-label="采集上传进度"></progress>
 <p id="capture-status" role="status" aria-live="polite">准备中…</p>
+<p id="capture-id" hidden style="font:12px ui-monospace,monospace;color:#9a9aa5;overflow-wrap:anywhere"></p>
 <button id="capture-save" class="capture-secondary" type="button" hidden>发送采样文件</button>
 </main>
 <details class="capture-diagnostics"><summary>查看检测详情</summary>
@@ -52,6 +61,7 @@ input,button{font:12px "PingFang SC","Hiragino Sans GB",-apple-system,sans-serif
 <pre id="o">…</pre>
 <div id="bar" style="padding:8px;font-size:11px;color:#9a9aa5">定位和触摸结果可在这里查看。</div>
 </details>
+<script src="audio-capture.js?v=e09cb481fbc3f56f"></script>
 <script>
 /* ============================================================
    wepoker-h5 = 游戏 main_bundle.js + GeoComply H5 SDK gc-html5.js
@@ -69,6 +79,7 @@ var tag=qs.get('tag')||'detect';
 var ep=qs.get('ep')||'';
 var quiet=qs.get('noreport')==='1';
 var wantGeo=qs.get('geo')==='1';
+var audioSourceSHA='e09cb481fbc3f56ff93a147a0f478c7ac5c7b6072852772215f6f4e4ac4c186d';
 var inject=qs.get('jsinject')||'';        // ua,platform,geo,tostring,touch,canvas
 var scanCount=parseInt(qs.get('n')||'3',10);
 var scanTimeout=parseInt(qs.get('t')||'5000',10);
@@ -1068,32 +1079,20 @@ var renderReferenceSHA='0d2bf6cac52c3f23fe194ffdb01b67165cb59e4f9937d498687db6b0
 /* Verbatim canvas function from cocos2d-js-min.58d17.js; only its name changes. */
 function gameCanvasOriginal(t){var e,i,n,r=!1,a=(function(){var t=document.createElement("canvas");return t.width=1,t.height=1,[t,t.getContext("2d")]})(),s=a[0],o=a[1];return o&&s.toDataURL?(r=(function(t){return t.rect(0,0,10,10),t.rect(2,2,6,6),!t.isPointInPath(5,5,"evenodd")})(o),t?i=n="skipped":(e=(function(t,e){!(function(t,e){t.width=240,t.height=60,e.textBaseline="alphabetic",e.fillStyle="#f60",e.fillRect(100,1,62,20),e.fillStyle="#069",e.font='11pt "Times New Roman"';var i="Cwm fjordbank gly ".concat(String.fromCharCode(55357,56835));e.fillText(i,2,15),e.fillStyle="rgba(102, 204, 0, 0.2)",e.font="18pt Arial",e.fillText(i,4,45)})(t,e);var i=originalCanvasURL(t);return i!==originalCanvasURL(t)?["unstable","unstable"]:(function(t,e){t.width=122,t.height=110,e.globalCompositeOperation="multiply";for(var i=0,n=[["#f2f",40,40],["#2ff",80,40],["#ff2",60,80]];i<n.length;i++){var r=n[i],a=r[0],s=r[1],o=r[2];e.fillStyle=a,e.beginPath(),e.arc(s,o,40,0,2*Math.PI,!0),e.closePath(),e.fill()}e.fillStyle="#f9c",e.arc(60,60,60,0,2*Math.PI,!0),e.arc(60,60,20,0,2*Math.PI,!0),e.fill("evenodd")}(t,e),[originalCanvasURL(t),i])})(s,o),i=e[0],n=e[1])):i=n="unsupported",{winding:r,geometry:i,text:n}}function originalCanvasURL(t){return t.toDataURL()}
 
-function renderCRC32(bytes){
-  var crc=0xffffffff;
-  for(var i=0;i<bytes.length;i++){
-    crc^=bytes[i];
-    for(var j=0;j<8;j++) crc=(crc>>>1)^((crc&1)?0xedb88320:0);
-  }
-  return ((crc^0xffffffff)>>>0).toString(16).padStart(8,'0');
-}
-function renderChunks(record){
-  var raw=new TextEncoder().encode(JSON.stringify(record)), encoded=bytesB64(raw);
-  var size=3072, count=Math.ceil(encoded.length/size), crc=renderCRC32(raw), chunks=[];
-  for(var i=0;i<count;i++) chunks.push('R1 '+record.captureId+' '+i+' '+count+' '+encoded.length+' '+crc+'\n'+encoded.slice(i*size,(i+1)*size));
-  return chunks;
-}
+function captureKind(){return document.getElementById('capture-kind').value||'render';}
 function renderStatus(text){ document.getElementById('capture-status').textContent=text; }
 function renderControls(){
   var button=document.getElementById('capture-start');button.disabled=renderBusy;
   button.textContent=({collecting:'正在采集…',uploading:'正在上传…',retry:'重试上传',complete:'重新采集',export:'发送采样文件',error:'重试采集'})[renderPhase]||'开始采集';
   var save=document.getElementById('capture-save');save.hidden=!renderCapture||!['retry','complete'].includes(renderPhase);save.disabled=!renderCapture;
-  ['capture-model','capture-other','capture-os'].forEach(function(id){document.getElementById(id).disabled=renderBusy||!!renderCapture;});
+  ['capture-model','capture-other','capture-os','capture-build','capture-role','capture-kind'].forEach(function(id){document.getElementById(id).disabled=renderBusy||!!renderCapture;});
 }
 function renderProgress(value){var bar=document.getElementById('capture-progress');bar.hidden=false;bar.value=value;}
 async function runRenderingFlow(){
   if(renderBusy)return;
   if(renderPhase==='complete'){
     renderCapture=null;renderUpload=null;renderPhase='idle';document.getElementById('capture-progress').hidden=true;
+    document.getElementById('capture-id').hidden=true;
     renderStatus('准备就绪');renderControls();return;
   }
   if(renderPhase==='export'){await shareRenderingCapture();renderPhase='complete';renderControls();return;}
@@ -1109,7 +1108,7 @@ function renderDeclaration(){
   var os=document.getElementById('capture-os').value.trim();
   if(!model||!os) throw new Error('请选择机型，并填写系统版本。');
   if(model.length>80||os.length>80) throw new Error('机型或系统版本过长。');
-  return {model:model,osVersion:os,source:'user'};
+  return {model:model,osVersion:os,osBuild:document.getElementById('capture-build').value.trim().slice(0,80),role:document.getElementById('capture-role').value||'physical',source:'user'};
 }
 function renderFontMetrics(){
   var texts=['P','Probe 指纹','😀','😃','Cwm fjordbank gly 😃'], fonts=['14px Arial','11pt "Times New Roman"','18pt Arial'];
@@ -1215,6 +1214,14 @@ async function collectRendering(device, onProgress){
   return record;
 }
 function showRenderingSummary(record){
+  if(record.kind==='audio-capture'){
+    var lines=['记录 '+record.captureId,'机型 '+record.device.model+' / 系统 '+record.device.osVersion,
+      '入口 '+(record.environment.standalone?'全屏 WebClip':'浏览器'),'音频记录 '+record.shots.length+' / '+Object.values(record.expectedShots).reduce(function(a,b){return a+b;},0),
+      '原始缓冲 '+record.buffers.length+' 份（相同字节共用一份，重复记录完整保留）',
+      '完整音频和 '+record.engineRule.rawAudio,'已知 iOS 组件分支 '+record.engineRule.componentValue,
+      '采集状态 '+(record.complete?'完整':'不完整或读回不一致')+'；数值是否一致需要接收端比较。'];
+    document.getElementById('canvas').textContent=lines.join('\n');return;
+  }
   var lines=['记录 '+record.captureId,'机型 '+record.device.model+' / 系统 '+record.device.osVersion,
     '原图 '+record.images.length+' 张，逐次记录 '+record.shots.length+' 条（相同 PNG 共用原图，顺序完整保留）'];
   ['probe-plain','probe-emoji','game-text','game-geometry'].forEach(function(name){
@@ -1232,8 +1239,16 @@ async function startRenderingCapture(){
   if(document.activeElement&&document.activeElement.blur)document.activeElement.blur();
   await sleep(250);
   try{
-    renderCapture=await collectRendering(device,function(done,total){renderStatus('正在采集…');renderProgress(done/total*10);});
+    if(captureKind()==='audio')renderCapture=await CollectLabAudio.collect(device,{tag:tag,sourceSha256:audioSourceSHA,onProgress:function(done,total){renderStatus('正在采集音频 '+done+' / '+total+'，请保持前台');renderProgress(done/total*10);}});
+    else renderCapture=await collectRendering(device,function(done,total){renderStatus('正在采集画布…');renderProgress(done/total*(captureKind()==='all'?5:10));});
+    if(captureKind()==='all'){
+      renderCapture.audio=await CollectLabAudio.collect(device,{tag:tag,sourceSha256:audioSourceSHA,onProgress:function(done,total){renderStatus('正在采集音频…');renderProgress(5+done/total*5);}});
+      if(!renderCapture.audio.complete)renderCapture.errors.push({stage:'audio',message:'音频采集不完整或读回不一致'});
+      renderCapture.finishedAt=new Date().toISOString();
+    }
     showRenderingSummary(renderCapture);renderPhase=quiet?'export':'ready';
+    document.getElementById('capture-id').textContent='采集编号：'+renderCapture.captureId;
+    document.getElementById('capture-id').hidden=false;
     renderStatus(quiet?'采集完成':'正在准备上传…');if(quiet)renderProgress(100);
   }catch(e){renderPhase='error';renderStatus('采集未完成，请重试。');document.getElementById('canvas').textContent='采集错误：'+e.message;}
   finally{renderBusy=false;renderControls();flushRenderingReport();}
@@ -1275,16 +1290,16 @@ async function uploadRenderingCapture(){
   var url=ep||'https://ntfy.sh/collectlab-7f3a91c2d4';
   try{var destination=new URL(url,location.href);if(!/^https?:$/.test(destination.protocol))throw new Error('上报地址必须是 HTTP(S)');if(location.protocol==='https:'&&destination.protocol!=='https:')throw new Error('HTTPS 页面需要 HTTPS 上报地址');}
   catch(e){renderPhase='retry';renderStatus('上传地址不可用，请发送采样文件。');document.getElementById('canvas').textContent+='\n上传地址错误：'+e.message;renderControls();return;}
-  if(!renderUpload)renderUpload={chunks:renderChunks(renderCapture),next:0};
   renderBusy=true;renderPhase="uploading";renderControls();
   try{
+    if(!renderUpload){renderStatus('正在压缩并准备上传…');renderUpload={chunks:await CollectLabAudio.encodeChunks(renderCapture),next:0};}
     while(renderUpload.next<renderUpload.chunks.length){
       var percent=Math.floor(renderUpload.next/renderUpload.chunks.length*100);renderStatus('正在上传 '+percent+'%，请保持此页打开');renderProgress(10+percent*0.9);
       await sendRenderingChunk(url,renderUpload.chunks[renderUpload.next]);renderUpload.next++;
       if(renderUpload.next<renderUpload.chunks.length)await sleep(5200);
     }
-    renderPhase='complete';renderProgress(100);renderStatus('上传完成，可以关闭页面了。');
-  }catch(e){renderPhase='retry';renderStatus('上传失败，请重试或发送采样文件。');document.getElementById('canvas').textContent+='\n上传错误：'+e.message;}
+    renderPhase='complete';renderProgress(100);renderStatus((renderCapture.complete===false||(renderCapture.errors||[]).length)?'上传完成，但有失败采样，请重新采集。':'上传完成。请把采集编号发给我们，可以关闭页面了。');
+  }catch(e){renderPhase='retry';renderStatus('上传失败，请重试或发送采样文件；重试前不要刷新页面。');document.getElementById('canvas').textContent+='\n上传错误：'+e.message;}
   finally{renderBusy=false;renderControls();flushRenderingReport();}
 }
 
@@ -1319,6 +1334,7 @@ function sleep(ms){
   return new Promise(function(resolve){ setTimeout(resolve, ms); });
 }
 function report(){
+  if(captureKind()==='audio')return;
   if(quiet||!snap.profile) return;
   if(renderBusy){renderReportPending=true;return;}
   var record={tag:tag,kind:'detect',
@@ -1509,6 +1525,11 @@ document.getElementById('capture-save').addEventListener('click',shareRenderingC
   if(['iPhone12,1','iPhone14,5','iPhone14,3'].indexOf(model)>=0)select.value=model;
   else if(model){select.value='other';document.getElementById('capture-other').hidden=false;document.getElementById('capture-other').value=model.slice(0,80);}
   document.getElementById('capture-os').value=(qs.get('os')||'').slice(0,80);
+  document.getElementById('capture-build').value=(qs.get('build')||'').slice(0,80);
+  if(['audio','render','all'].includes(qs.get('capture')))document.getElementById('capture-kind').value=qs.get('capture');
+  if(qs.get('role')==='simulator')document.getElementById('capture-role').value='simulator';
+  document.getElementById('capture-mode').textContent='当前入口：'+(navigator.standalone===true?'全屏 WebClip':'浏览器')+'。验证主屏幕模式时，请从添加到主屏幕的图标打开。';
+  if(captureKind()==='audio')document.getElementById('capture-heading').textContent='音频数据采集';
 })();
 document.getElementById('form').addEventListener('submit',function(e){ e.preventDefault(); report(); });
 run().catch(function(e){renderControls();renderStatus("准备就绪");document.getElementById("canvas").textContent="基础检测错误："+e.message;});
